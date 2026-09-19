@@ -2630,7 +2630,10 @@ def main():
     def runner():
         ui.wait_for_api_key()
         jarvis = JarvisLive(ui)
-        clap_launch.watch_wake_requests(lambda: jarvis.wake(reason="launcher"))
+        def _on_launch_again():
+            ui.bring_to_front()
+            jarvis.wake(reason="launcher")
+        clap_launch.watch_wake_requests(_on_launch_again)
         try:
             asyncio.run(jarvis.run())
         except KeyboardInterrupt:

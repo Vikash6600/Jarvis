@@ -3668,6 +3668,7 @@ class MainWindow(QMainWindow):
     _review_sig     = pyqtSignal(str, str, object, object)  # document review payload
     _missions_sig   = pyqtSignal()           # mission store changed (any thread)
     _brief_sig      = pyqtSignal(str)        # open a mission's brief (any thread)
+    _front_sig      = pyqtSignal()           # bring the window to the front (any thread)
 
     def __init__(self, face_path: str):
         super().__init__()
@@ -3833,6 +3834,7 @@ class MainWindow(QMainWindow):
         self._review_sig.connect(self._show_review)
         self._missions_sig.connect(self._refresh_missions)
         self._brief_sig.connect(self._open_mission)
+        self._front_sig.connect(self._bring_to_front)
         self.missions = None
         self._cam_stop = threading.Event()
 
@@ -6122,6 +6124,16 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
 
+    def _bring_to_front(self):
+        if self.isMinimized():
+            self.showNormal()
+        self.show(); self.raise_(); self.activateWindow()
+        try:
+            import ctypes
+            ctypes.windll.user32.SetForegroundWindow(int(self.winId()))
+        except Exception:
+            pass
+
     def _refresh_missions(self):
         mc = getattr(self, "missions", None)
         if mc is None:
@@ -6346,6 +6358,10 @@ class JarvisUI:
     def missions(self, mc):
         self._win.missions = mc
         self._win._missions_sig.emit()
+
+    def bring_to_front(self) -> None:
+        """Thread-safe: restore and focus the Jarvis window."""
+        self._win._front_sig.emit()
 
     def missions_changed(self) -> None:
         """Thread-safe: refresh the MISSIONS panel."""

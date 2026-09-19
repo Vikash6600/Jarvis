@@ -100,6 +100,15 @@ class C:
     BAR_BG    = "#0e2156"
 
 
+# Dark-blue gradient shades used for the window chrome and panels.
+GRAD_PANEL  = ("qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #081a5a, "
+               "stop:0.45 #051040, stop:1 #01051a)")
+GRAD_BAR    = ("qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #01051a, "
+               "stop:0.5 #0a1f6a, stop:1 #01051a)")
+GRAD_WINDOW = ("qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #061445, "
+               "stop:1 #00030f)")
+
+
 # Fonts bundled in assets/fonts (SIL OFL). Loaded by load_fonts(); if a file is
 # missing Qt quietly falls back to a system face, so the UI never breaks.
 FONT_MONO    = "Share Tech Mono"
@@ -569,10 +578,10 @@ class HudCanvas(QWidget):
         cx, cy = W / 2, H * 0.44
         rr = max(W, H) * 0.75
         g = QRadialGradient(cx, cy, rr)
-        g.setColorAt(0.0, QColor("#0a2178"))
-        g.setColorAt(0.38, QColor("#06134f"))
-        g.setColorAt(0.72, qcol(C.BG))
-        g.setColorAt(1.0, QColor("#01051a"))
+        g.setColorAt(0.0, QColor("#0b2372"))
+        g.setColorAt(0.33, QColor("#061550"))
+        g.setColorAt(0.68, QColor("#030b33"))
+        g.setColorAt(1.0, QColor("#00030f"))
         gp.fillRect(0, 0, W, H, QBrush(g))
         gp.setPen(QPen(qcol(C.PRI_GHO), 1))
         for x in range(0, W, 40):
@@ -1144,9 +1153,9 @@ class LogWidget(QTextEdit):
         self.setFont(QFont(FONT_MONO, 9))
         self.setStyleSheet(f"""
             QTextEdit {{
-                background: {C.PANEL};
+                background: rgba(2, 8, 36, 150);
                 color: {C.TEXT};
-                border: 1px solid {C.BORDER};
+                border: 1px solid {C.BORDER_B};
                 border-radius: 4px;
                 padding: 6px;
                 selection-background-color: {C.PRI_GHO};
@@ -1668,7 +1677,8 @@ class ModelHubOverlay(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setObjectName("ModelHub")
         self.setStyleSheet(f"""
-            QWidget#ModelHub {{ background: rgba(4, 11, 40, 246);
+            QWidget#ModelHub {{ background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                stop:0 rgba(9, 28, 96, 248), stop:0.5 rgba(4, 12, 46, 250), stop:1 rgba(1, 4, 22, 252));
                 border: 1px solid {C.PRI}; border-radius: 4px; }}
             QLabel {{ background: transparent; border: none; }}
             QLineEdit {{ background: #030a2c; color: {C.WHITE}; border: 1px solid {C.BORDER_B};
@@ -1800,7 +1810,7 @@ class ModelHubOverlay(QWidget):
         pre, prov = M.PRESETS[pid], self._prov[pid]
         box = QFrame()
         box.setObjectName("KeyRow")
-        box.setStyleSheet(f"QFrame#KeyRow {{ background: rgba(6, 17, 61, 200); border: 1px solid {C.BORDER};"
+        box.setStyleSheet(f"QFrame#KeyRow {{ background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 rgba(10, 30, 100, 210), stop:1 rgba(3, 9, 36, 200)); border: 1px solid {C.BORDER};"
                           f" border-left: 3px solid {C.BORDER_B}; }}")
         v = QVBoxLayout(box); v.setContentsMargins(10, 6, 10, 6); v.setSpacing(4)
         h = QHBoxLayout(); h.setSpacing(8)
@@ -1856,7 +1866,7 @@ class ModelHubOverlay(QWidget):
         col = C.GREEN if ok else (C.RED if ok is False else C.ACC2)
         r["status"].setText(("● " if ok is not None else "◌ ") + msg)
         r["status"].setStyleSheet(f"color: {col};")
-        r["box"].setStyleSheet(f"QFrame#KeyRow {{ background: rgba(6, 17, 61, 200); border: 1px solid {C.BORDER};"
+        r["box"].setStyleSheet(f"QFrame#KeyRow {{ background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 rgba(10, 30, 100, 210), stop:1 rgba(3, 9, 36, 200)); border: 1px solid {C.BORDER};"
                                f" border-left: 3px solid {col if ok else C.BORDER_B}; }}")
 
     def _collect(self, pid: str) -> dict:
@@ -3432,7 +3442,8 @@ class MainWindow(QMainWindow):
         self._customize_overlay: CustomizeOverlay | None = None
 
         central = QWidget()
-        central.setStyleSheet(f"background: {C.BG};")
+        central.setObjectName("Central")
+        central.setStyleSheet(f"QWidget#Central {{ background: {GRAD_WINDOW}; }}")
         self.setCentralWidget(central)
 
         root = QVBoxLayout(central)
@@ -4087,8 +4098,8 @@ class MainWindow(QMainWindow):
     def _build_header(self) -> QWidget:
         w = QWidget()
         w.setFixedHeight(62)
-        w.setStyleSheet(f"background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #050e3a, stop:1 {C.DARK});"
-                        f" border-bottom: 1px solid {C.BORDER_B};")
+        w.setObjectName("Header")
+        w.setStyleSheet(f"QWidget#Header {{ background: {GRAD_BAR}; border-bottom: 1px solid {C.BORDER_B}; }}")
         lay = QHBoxLayout(w)
         lay.setContentsMargins(16, 0, 16, 0)
 
@@ -4164,7 +4175,8 @@ class MainWindow(QMainWindow):
     def _build_left_panel(self) -> QWidget:
         w = QWidget()
         w.setFixedWidth(_LEFT_W)
-        w.setStyleSheet(f"background: {C.DARK}; border-right: 1px solid {C.BORDER};")
+        w.setObjectName("LeftPanel")
+        w.setStyleSheet(f"QWidget#LeftPanel {{ background: {GRAD_PANEL}; border-right: 1px solid {C.BORDER_B}; }}")
         lay = QVBoxLayout(w)
         lay.setContentsMargins(8, 10, 8, 10)
         lay.setSpacing(6)
@@ -4235,7 +4247,8 @@ class MainWindow(QMainWindow):
     def _build_right_panel(self) -> QWidget:
         w = QWidget()
         w.setFixedWidth(_RIGHT_W)
-        w.setStyleSheet(f"background: {C.DARK}; border-left: 1px solid {C.BORDER};")
+        w.setObjectName("RightPanel")
+        w.setStyleSheet(f"QWidget#RightPanel {{ background: {GRAD_PANEL}; border-left: 1px solid {C.BORDER_B}; }}")
         lay = QVBoxLayout(w)
         lay.setContentsMargins(8, 8, 8, 8)
         lay.setSpacing(6)
@@ -4324,7 +4337,7 @@ class MainWindow(QMainWindow):
         w.setObjectName("QuickDrawer")
         w.setStyleSheet(f"""
             QWidget#QuickDrawer {{
-                background: {C.DARK};
+                background: {GRAD_PANEL};
                 border: 1px solid {C.BORDER_B};
                 border-top: none;
                 border-radius: 0 0 6px 6px;
@@ -4982,7 +4995,8 @@ class MainWindow(QMainWindow):
     def _build_footer(self) -> QWidget:
         w = QWidget()
         w.setFixedHeight(22)
-        w.setStyleSheet(f"background: {C.DARK}; border-top: 1px solid {C.BORDER};")
+        w.setObjectName("Footer")
+        w.setStyleSheet(f"QWidget#Footer {{ background: {GRAD_BAR}; border-top: 1px solid {C.BORDER_B}; }}")
         lay = QHBoxLayout(w); lay.setContentsMargins(14, 0, 14, 0)
 
         def _fl(txt, color=C.TEXT_MED):

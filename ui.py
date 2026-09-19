@@ -3436,6 +3436,9 @@ class MainWindow(QMainWindow):
         self.on_push_to_talk   = None   # callable: (enable: bool) -> str scope
         self.ptt_hold          = None   # callable: (held: bool) -> None — windowed chord
         self.wake_get_state    = None   # callable: () -> dict {enabled, awake, ready}
+        self.clap_get_state    = None   # callable: () -> dict {mode, sensitivity}
+        self.on_clap_mode      = None   # callable: (mode: str) -> str message
+        self.on_clap_sensitivity = None # callable: (level: str) -> None
         self._muted            = False
         self._current_file: str | None = None
         self._remote_overlay: RemoteKeyOverlay | None = None
@@ -3460,6 +3463,7 @@ class MainWindow(QMainWindow):
 
         # Center column: HUD + resizable content panel via QSplitter
         self.hud = HudCanvas(face_path, _display)
+        self.hud.on_globe_click = self._on_globe_click
         self.hud.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self._content_panel = self._build_content_panel()
         self._quiz_panel = self._build_quiz_panel()
@@ -4438,6 +4442,21 @@ class MainWindow(QMainWindow):
 
         self._refresh_talk_btns()
 
+        # ── Double clap ────────────────────────────────────────────────────────
+        self._clap_btn = QPushButton()
+        self._clap_btn.setFixedHeight(26)
+        self._clap_btn.setFont(QFont(FONT_MONO, 7))
+        self._clap_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._clap_btn.clicked.connect(self._cycle_clap_mode)
+        lay.addWidget(self._clap_btn)
+        self._clap_sens_btn = QPushButton()
+        self._clap_sens_btn.setFixedHeight(22)
+        self._clap_sens_btn.setFont(QFont(FONT_MONO, 7))
+        self._clap_sens_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._clap_sens_btn.clicked.connect(self._cycle_clap_sens)
+        lay.addWidget(self._clap_sens_btn)
+        self._refresh_clap_btns()
+
         self._hud_btn = QPushButton()
         self._hud_btn.setFixedHeight(26)
         self._hud_btn.setFont(QFont(FONT_MONO, 7))
@@ -5262,6 +5281,80 @@ class MainWindow(QMainWindow):
         self._hud_btn.setStyleSheet(style)
         self._hud_btn.setToolTip("Tap to cycle the centrepiece: particle globe → animated face → reactor core.")
 
+    # ── Double clap controls ─────────────────────────────────────────────────
+    _CLAP_LABELS = {"off": "👏  DOUBLE CLAP: OFF", "wake": "👏  DOUBLE CLAP: WAKE",
+                    "launch": "👏  DOUBLE CLAP: WAKE + LAUNCH"}
+
+    def _clap_state_now(self) -> dict:
+        if self.clap_get_state:
+            try:
+                return self.clap_get_state()
+            except Exception:
+                pass
+        from memory.config_manager import get_clap_mode, get_clap_sensitivity
+        return {"mode": get_clap_mode(), "sensitivity": get_clap_sensitivity()}
+
+    def _refresh_clap_btns(self):
+        st = self._clap_state_now()
+        on = st["mode"] != "off"
+        self._clap_btn.setText(self._CLAP_LABELS.get(st["mode"], self._CLAP_LABELS["off"]))
+        self._clap_btn.setToolTip("Tap to cycle: off → wake from sleep → wake and also launch Jarvis "
+                                  "when it is closed (a small background listener, starts with Windows).")
+        self._clap_btn.setStyleSheet(f"""
+            QPushButton {{ background: {C.PANEL2 if on else 'transparent'}; color: {C.ACC2 if on else C.TEXT_MED};
+                border: 1px solid {C.ACC2 if on else C.BORDER}; border-radius: 3px; text-align: left; padding: 0 8px; }}
+            QPushButton:hover {{ color: {C.WHITE}; border-color: {C.BORDER_B}; }}""")
+        self._clap_sens_btn.setText(f"     SENSITIVITY: {st['sensitivity'].upper()}")
+        self._clap_sens_btn.setVisible(on)
+        self._clap_sens_btn.setStyleSheet(f"""
+            QPushButton {{ background: transparent; color: {C.TEXT_DIM}; border: none; text-align: left; padding: 0 8px; }}
+            QPushButton:hover {{ color: {C.PRI}; }}""")
+        try:
+            self._position_quick_drawer()
+        except Exception:
+            pass
+
+    def _cycle_clap_mode(self):
+        order = ["off", "wake", "launch"]
+        cur = self._clap_state_now()["mode"]
+        nxt = order[(order.index(cur) + 1) % len(order)] if cur in order else "wake"
+        msg = ""
+        if self.on_clap_mode:
+            try:
+                msg = self.on_clap_mode(nxt) or ""
+            except Exception as e:
+                msg = f"clap setting failed: {e}"
+        else:
+            from memory.config_manager import save_clap_mode
+            save_clap_mode(nxt)
+        self._refresh_clap_btns()
+        self._log.append_log({"off": "SYS: Double clap off.",
+                              "wake": "SYS: Double clap on — clap twice to wake me from sleep.",
+                              "launch": f"SYS: {msg}"}.get(nxt, "SYS: Double clap updated."))
+
+    def _cycle_clap_sens(self):
+        order = ["low", "medium", "high"]
+        cur = self._clap_state_now()["sensitivity"]
+        nxt = order[(order.index(cur) + 1) % len(order)] if cur in order else "medium"
+        if self.on_clap_sensitivity:
+            try:
+                self.on_clap_sensitivity(nxt)
+            except Exception:
+                pass
+        else:
+            from memory.config_manager import save_clap_sensitivity
+            save_clap_sensitivity(nxt)
+        self._refresh_clap_btns()
+
+    def _on_globe_click(self):
+        """Click the globe while asleep → wake (same as the WAKE NOW button)."""
+        try:
+            st = self.wake_get_state() if self.wake_get_state else None
+            if st and not st.get("awake", True) and self.on_wake_manual:
+                self.on_wake_manual()
+        except Exception:
+            pass
+
     def _toggle_hud_style(self):
         """Cycle the centrepiece. All objects stay in memory, so the change is
         instant and switching back costs nothing."""
@@ -5851,6 +5944,41 @@ class JarvisUI:
     @wake_get_state.setter
     def wake_get_state(self, cb):
         self._win.wake_get_state = cb
+
+    @property
+    def clap_get_state(self):
+        return self._win.clap_get_state
+
+    @clap_get_state.setter
+    def clap_get_state(self, cb):
+        self._win.clap_get_state = cb
+        QTimer.singleShot(0, self._win._refresh_clap_btns)
+
+    @property
+    def on_clap_mode(self):
+        return self._win.on_clap_mode
+
+    @on_clap_mode.setter
+    def on_clap_mode(self, cb):
+        self._win.on_clap_mode = cb
+
+    @property
+    def on_clap_sensitivity(self):
+        return self._win.on_clap_sensitivity
+
+    @on_clap_sensitivity.setter
+    def on_clap_sensitivity(self, cb):
+        self._win.on_clap_sensitivity = cb
+
+    def clap_pulse(self) -> None:
+        """Thread-safe: ripple the globe when a double clap is heard."""
+        try:
+            g = self._win.hud._globe
+            if g is not None:
+                g.pulse()
+                g.pulse()
+        except Exception:
+            pass
 
     def set_audio_level(self, level: float) -> None:
         """Thread-safe: feed a 0.0–1.0 live audio level to the HUD waveform.

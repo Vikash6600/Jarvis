@@ -121,6 +121,32 @@ def save_wake_word_enabled(enabled: bool) -> None:
     CONFIG_FILE.write_text(json.dumps(data, indent=4), encoding="utf-8")
 
 
+CLAP_MODES = ("off", "wake", "launch")
+CLAP_SENSITIVITIES = ("low", "medium", "high")
+
+
+def get_clap_mode() -> str:
+    """Double clap: 'off', 'wake' (wake from sleep while Jarvis runs) or
+    'launch' (also start Jarvis when it is closed, via clap_launcher.py)."""
+    v = str(load_api_keys().get("clap_mode", "off")).strip().lower()
+    return v if v in CLAP_MODES else "off"
+
+
+def save_clap_mode(mode: str) -> None:
+    m = str(mode or "").strip().lower()
+    _save_flag("clap_mode", m if m in CLAP_MODES else "off")
+
+
+def get_clap_sensitivity() -> str:
+    v = str(load_api_keys().get("clap_sensitivity", "medium")).strip().lower()
+    return v if v in CLAP_SENSITIVITIES else "medium"
+
+
+def save_clap_sensitivity(level: str) -> None:
+    s = str(level or "").strip().lower()
+    _save_flag("clap_sensitivity", s if s in CLAP_SENSITIVITIES else "medium")
+
+
 def get_push_to_talk_enabled() -> bool:
     """Hold-a-key-to-speak. When on, the mic is closed unless the chord is held."""
     return load_api_keys().get("push_to_talk_enabled", False)

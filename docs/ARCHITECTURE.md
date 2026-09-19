@@ -32,6 +32,14 @@ clap_launcher.py (separate, optional, pythonw) — listens only while Jarvis is 
 | `core/clap_launch.py` | Instance lock, wake-request file, HKCU Run registration for the launcher. |
 | `core/safety.py` | `assess()` risk 0–7 and `run_guarded()` (block ≥7, HUD approval 4–6). |
 | `core/confirm.py` | Human-in-the-loop gate: banner on the HUD, action runs only after CONFIRM. |
+| `core/missions.py` | Mission store (`memory/missions.json`), states, routine schedule parser. |
+| `core/agent.py` | `MissionControl`: supervisor thread (2 concurrent, resumes after restart) + tool-calling agent loop (AGENT model job); plan → approval → execute → review → finish; routines. |
+| `core/agent_tools.py` | Workspace tools for missions: files (confined), guarded commands, fetch_url, preview_site (Playwright + vision review), look_at_screen, open_in_browser. |
+| `core/playbooks/*.md` | Expert instructions per mission kind (website, code, research, general, routine). |
+| `core/telegram_bridge.py` | Telegram long-poll bridge: pairing, commands, missions, chat replies, pushes. |
+| `core/notify.py` | Desktop toasts. |
+| `plugins/gmail.py`, `plugins/google_calendar.py`, `plugins/_google_core.py` | Google OAuth (desktop flow) + Gmail/Calendar tools; send/create go through the HUD confirm gate. |
+| `plugins/telegram_remote.py` | Telegram settings (token, pairing) + `telegram_send` tool. |
 | `core/jlog.py` | JSON-lines logging to `logs/jarvis.jsonl`, stdout/stderr tee. |
 | `core/wake_word.py` | openwakeword "Hey Jarvis". |
 | `actions/*.py` | Tools (`TOOL` dict + handler), auto-discovered by `core/action_loader.py`. Code-running tools (`code_helper`, `dev_agent`, `desktop`) go through `core/safety.run_guarded`. |
@@ -49,8 +57,12 @@ clap_launcher.py (separate, optional, pythonw) — listens only while Jarvis is 
 
 **Double clap** — asleep: mic frames → `ClapDetector.feed` → detector thread → `wake()` + globe ripple. Closed: `clap_launcher.py` → `main.py --wake`; a second launch writes `config/.wake_request` and exits.
 
+**Mission** — voice `start_mission` → `MissionControl.create` → supervisor starts a worker → PLANNING (research with tools, `submit_plan`) → HUD Mission Brief + Telegram → user APPROVE/REVISE → EXECUTING (`complete_step`…, `preview_site` review) → `finish` → toast, spoken update when idle, Telegram. Tool calls in the voice session run off the receive loop (`_dispatch_tools`), so the conversation never blocks.
+
+**Screen watch** — `_run_screen_watch` every 45 s (when enabled) → `_screen_glance` → VISION model → ALERT → spoken offer of help.
+
 **Risky code** — tool → `run_guarded(text, run)` → blocked / HUD approval (`confirm.request`) / run.
 
 ## Config keys (`config/api_keys.json`)
 
-`providers`, `model_roles`, `gemini_api_key` (legacy, kept in sync), `os_system`, `wake_word_enabled`, `clap_mode` (off/wake/launch), `clap_sensitivity`, `hud_style` (globe/face/core), `pipeline_voice` (edge-tts voice name), plus the original Mark LIV keys.
+`providers`, `model_roles`, `gemini_api_key` (legacy, kept in sync), `os_system`, `wake_word_enabled`, `clap_mode` (off/wake/launch), `clap_sensitivity`, `hud_style` (globe/face/core), `pipeline_voice` (edge-tts voice name), `screen_watch`, `plugin_config.telegram` (token, chat_id), `plugin_config.google` (client_secret path), plus the original Mark LIV keys. Missions live in `memory/missions.json`; workspaces in `~/Documents/Jarvis Missions/`; the Google token in `config/token_google.json`.

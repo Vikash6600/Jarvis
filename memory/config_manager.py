@@ -147,6 +147,15 @@ def save_clap_sensitivity(level: str) -> None:
     _save_flag("clap_sensitivity", s if s in CLAP_SENSITIVITIES else "medium")
 
 
+def get_screen_watch() -> bool:
+    """Screen watch: periodically glance at the screen and offer help on errors."""
+    return bool(load_api_keys().get("screen_watch", False))
+
+
+def save_screen_watch(enabled: bool) -> None:
+    _save_flag("screen_watch", bool(enabled))
+
+
 def get_push_to_talk_enabled() -> bool:
     """Hold-a-key-to-speak. When on, the mic is closed unless the chord is held."""
     return load_api_keys().get("push_to_talk_enabled", False)

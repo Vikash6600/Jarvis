@@ -20,3 +20,11 @@ First look at `logs/jarvis.jsonl` (one JSON object per line; newest at the botto
 | HUD globe missing | `ui.py` HudCanvas | `core/globe.py` failed to import → HUD falls back to the reactor core; check the log for the traceback. |
 | Fonts look like Courier | `ui.load_fonts` | `assets/fonts/*.ttf` missing → re-clone or restore the folder. |
 | Wrong mic / speaker | ⚙ → AUDIO DEVICES | Pick the device; Jarvis reconnects. |
+| Mission stuck on "PLAN READY" | `core/agent.py` | By design — approve or revise it (HUD brief, voice "approve the plan", or Telegram /approve). |
+| Mission paused "step budget" | `core/agent.py` STEP_BUDGET | Long jobs pause after 60 tool calls per run; say "resume the mission". |
+| Mission failed "no AI model could run the mission" | `MissionControl._chat` | The AGENT job's models all errored — check `[Missions]` lines; pin a working model for AGENT in AI MODELS. |
+| HTTP 404 "no longer available to new users" | Gemini | Google retired that model for new keys — AUTO prefers `-latest`; re-TEST the Gemini key to refresh the model list. |
+| preview_site fails | `core/agent_tools.py` | Playwright browser missing → `.venv\Scripts\python -m playwright install chromium`. |
+| Telegram silent | `core/telegram_bridge.py` | Token not set/paired → Plugin Settings → Telegram → CONNECT, then send the 6-digit code to the bot. Only the paired chat is answered. |
+| Gmail/Calendar "isn't connected" | `plugins/_google_core.py` | Add the OAuth Desktop-app client_secret path in Plugin Settings → Google and press SIGN IN. |
+| Screen watch never speaks | `main._run_screen_watch` | It only speaks for errors/dialogs, when awake and idle; check `WATCH:` lines in the log. |

@@ -4752,6 +4752,14 @@ class MainWindow(QMainWindow):
         lay.addWidget(self._clap_sens_btn)
         self._refresh_clap_btns()
 
+        self._watch_btn = QPushButton()
+        self._watch_btn.setFixedHeight(26)
+        self._watch_btn.setFont(QFont(FONT_MONO, 7))
+        self._watch_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._watch_btn.clicked.connect(self._toggle_screen_watch)
+        lay.addWidget(self._watch_btn)
+        self._refresh_watch_btn()
+
         self._hud_btn = QPushButton()
         self._hud_btn.setFixedHeight(26)
         self._hud_btn.setFont(QFont(FONT_MONO, 7))
@@ -5640,6 +5648,27 @@ class MainWindow(QMainWindow):
             from memory.config_manager import save_clap_sensitivity
             save_clap_sensitivity(nxt)
         self._refresh_clap_btns()
+
+    def _refresh_watch_btn(self):
+        from memory.config_manager import get_screen_watch
+        on = get_screen_watch()
+        self._watch_btn.setText("👁  SCREEN WATCH: " + ("ON" if on else "OFF"))
+        self._watch_btn.setToolTip("While on, Jarvis glances at your screen about every 45 s (sent to your "
+                                   "VISION model, never saved) and offers help when it sees an error or a "
+                                   "dialog that needs you.")
+        self._watch_btn.setStyleSheet(f"""
+            QPushButton {{ background: {C.PANEL2 if on else 'transparent'}; color: {C.ACC2 if on else C.TEXT_MED};
+                border: 1px solid {C.ACC2 if on else C.BORDER}; border-radius: 3px; text-align: left; padding: 0 8px; }}
+            QPushButton:hover {{ color: {C.WHITE}; border-color: {C.BORDER_B}; }}""")
+
+    def _toggle_screen_watch(self):
+        from memory.config_manager import get_screen_watch, save_screen_watch
+        on = not get_screen_watch()
+        save_screen_watch(on)
+        self._refresh_watch_btn()
+        self._log.append_log("SYS: Screen watch on — I'll glance at your screen now and then and speak up "
+                             "if something needs you. Screenshots are never saved." if on
+                             else "SYS: Screen watch off.")
 
     def _on_globe_click(self):
         """Click the globe while asleep → wake (same as the WAKE NOW button)."""

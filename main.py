@@ -283,6 +283,25 @@ def _render_prompt(template: str, values: dict) -> str:
     return out
 
 
+def _screen_glance() -> str:
+    import io
+    import mss
+    from PIL import Image
+    from google.genai import types
+    from core import gemini
+    with (mss.MSS() if hasattr(mss, "MSS") else mss.mss()) as sct:
+        g = sct.grab(sct.monitors[1])
+        im = Image.frombytes("RGB", g.size, g.rgb)
+    im.thumbnail((1280, 1280))
+    buf = io.BytesIO(); im.save(buf, format="JPEG", quality=70)
+    prompt = ("You watch the user's screen for them. Reply exactly 'OK' unless you clearly see something they "
+              "would want help with right now: an error message or stack trace, a failed build/test, a crash "
+              "dialog, a security/permission prompt, or a stuck installer. Then reply 'ALERT: <one short sentence "
+              "saying what you see and offering to help>'. Ignore normal content, videos, games and chats.")
+    return gemini.text([prompt, types.Part.from_bytes(data=buf.getvalue(), mime_type="image/jpeg")],
+                       tier=gemini.FAST, timeout_ms=30_000, default="OK")
+
+
 def _mission_user_name() -> str:
     try:
         from memory.config_manager import get_user_name
@@ -898,12 +917,33 @@ class JarvisLive:
         self.missions = MissionControl(
             MissionStore(), run_tool, decls,
             hooks={"announce": announce,
-                   "changed": lambda m: self.ui.missions_changed(),
+                   "changed": self._on_mission_changed,
                    "notify": notify_hook,
-                   "show_plan": lambda m: self.ui.show_mission_plan(m.id)},
+                   "show_plan": self._on_plan_ready},
             user_name=_mission_user_name())
         self.ui.missions = self.missions
         self.missions.start()
+        # Telegram remote: idle until a token is configured, then long-polls.
+        from core.telegram_bridge import TelegramBridge
+        self._telegram = TelegramBridge(self.missions, log=self.ui.write_log)
+        self._telegram.start()
+
+    def _on_mission_changed(self, m) -> None:
+        self.ui.missions_changed()
+        dash, loop = getattr(self, "_dashboard", None), getattr(self, "_loop", None)
+        if dash and loop:
+            try:
+                asyncio.run_coroutine_threadsafe(
+                    dash.broadcast({"type": "sys", "text": f"MISSION {m.short()}"}), loop)
+            except Exception:
+                pass
+
+    def _on_plan_ready(self, m) -> None:
+        self.ui.show_mission_plan(m.id)
+        try:
+            self._telegram.send_plan(m)
+        except Exception:
+            pass
 
     def _mission_tool(self, name: str, args: dict) -> str:
         mc = self.missions
@@ -942,6 +982,31 @@ class JarvisLive:
         if name == "cancel_mission":
             return mc.cancel(m)
         return "Unknown mission command."
+
+    async def _run_screen_watch(self) -> None:
+        """Watch mode (⚙ → SCREEN WATCH): every ~45 s a low-res screenshot goes
+        to the VISION model, which only speaks up for errors, failed builds or
+        dialogs that need the user. Nothing is saved to disk."""
+        from memory.config_manager import get_screen_watch
+        last, last_t = "", 0.0
+        while True:
+            await asyncio.sleep(45)
+            try:
+                if not get_screen_watch() or not self.session or not self._awake:
+                    continue
+                with self._speaking_lock:
+                    if self._is_speaking:
+                        continue
+                verdict = await asyncio.to_thread(_screen_glance)
+                if not verdict.upper().startswith("ALERT"):
+                    continue
+                msg = verdict.split(":", 1)[-1].strip()
+                if msg and (msg != last or time.time() - last_t > 600):
+                    last, last_t = msg, time.time()
+                    self.ui.write_log(f"WATCH: {msg}")
+                    self._announce_q.append(f"I noticed on your screen: {msg}")
+            except Exception as e:
+                print(f"[Watch] {e}")
 
     async def _run_mission_announcer(self) -> None:
         """Speak important mission updates — only when Jarvis is idle, awake,
@@ -2317,6 +2382,7 @@ class JarvisLive:
         # Mission updates are spoken whenever Jarvis is idle — for the whole
         # lifetime, independent of the dashboard and of reconnects.
         asyncio.create_task(self._run_mission_announcer())
+        asyncio.create_task(self._run_screen_watch())
 
         # Start dashboard (optional — needs: pip install fastapi "uvicorn[standard]" cryptography)
         try:

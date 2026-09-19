@@ -2382,6 +2382,8 @@ def _consume_wake_on_start() -> None:
 
 
 def main():
+    from core import jlog
+    jlog.install()          # every print/traceback also goes to logs/jarvis.jsonl
     from core import clap_launch
     if not clap_launch.acquire_instance_lock():
         # Already running — tell that copy to wake instead of opening a second one.

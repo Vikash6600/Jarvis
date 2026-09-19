@@ -209,6 +209,18 @@ Fixed code:"""
 
 
 def _run_file(path: Path, args: list, timeout: int) -> str:
+    """Screen the script with core/safety.py, then run it (or ask first)."""
+    from core.safety import run_guarded
+    try:
+        code = path.read_text(encoding="utf-8", errors="replace")
+    except Exception:
+        code = ""
+    return run_guarded("run_code", f"Run {path.name}",
+                       code + "\n" + " ".join(map(str, args or [])),
+                       lambda: _run_file_now(path, args, timeout))
+
+
+def _run_file_now(path: Path, args: list, timeout: int) -> str:
     interpreters = {
         ".py":  [sys.executable],
         ".js":  ["node"],

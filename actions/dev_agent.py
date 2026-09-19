@@ -296,6 +296,20 @@ def _open_vscode(project_dir: Path) -> bool:
     return False
 
 def _run_project(run_command: str, project_dir: Path, timeout: int = 30) -> str:
+    """Screen the command and the project's source with core/safety.py first."""
+    from core.safety import run_guarded
+    src = [run_command]
+    try:
+        for f in sorted(project_dir.rglob("*"))[:200]:
+            if f.suffix.lower() in (".py", ".js", ".ts", ".sh", ".ps1", ".bat", ".cmd") and f.stat().st_size < 200_000:
+                src.append(f.read_text(encoding="utf-8", errors="replace"))
+    except Exception:
+        pass
+    return run_guarded("dev_run", f"Run project: {run_command}", "\n".join(src),
+                       lambda: _run_project_now(run_command, project_dir, timeout))
+
+
+def _run_project_now(run_command: str, project_dir: Path, timeout: int = 30) -> str:
     print(f"[DevAgent] 🚀 Running: {run_command}")
     try:
         parts = run_command.split()

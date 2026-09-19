@@ -83,6 +83,13 @@ def _build_sandbox() -> dict:
 def _execute_generated_code(code: str, player=None) -> str:
     if not code or code.strip() == "UNSAFE":
         return "This action cannot be performed safely."
+    # The prompt asks the model not to delete or shell out; this enforces it.
+    from core.safety import run_guarded
+    return run_guarded("desktop_code", "Desktop automation", code,
+                       lambda: _execute_generated_code_now(code, player))
+
+
+def _execute_generated_code_now(code: str, player=None) -> str:
 
     # Kod temizleme
     if code.startswith("```"):

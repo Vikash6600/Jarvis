@@ -69,7 +69,7 @@ APP_PROTOCOL = APP_VERSION.split()[-1]
 
 _DEFAULT_W, _DEFAULT_H = 980, 700
 _MIN_W,     _MIN_H     = 820, 580
-_LEFT_W  = 148
+_LEFT_W  = 196
 _RIGHT_W = 340
 
 _OS = platform.system()  # "Windows" | "Darwin" | "Linux"
@@ -1078,6 +1078,90 @@ class HudCanvas(QWidget):
             p.fillRect(QRectF(wx0 + i * bw, wy + 20 - hgt, bw - 1, hgt), cl)
 
         p.end()   # end deterministically so the backing store never flushes an active painter
+
+
+class RadarWidget(QWidget):
+    """Network radar: one blip per live TCP connection (angle from the remote
+    address, distance from the port), swept by a rotating beam. Real data from
+    psutil, refreshed every 3 s on a worker thread."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setMinimumHeight(150)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.setFixedHeight(160)
+        self._blips: list[tuple[float, float, bool]] = []
+        self._count = 0
+        self._a = 0.0
+        self._tmr = QTimer(self)
+        self._tmr.timeout.connect(self._tick)
+        self._tmr.start(50)
+        self._poll = QTimer(self)
+        self._poll.timeout.connect(self._refresh)
+        self._poll.start(3000)
+        self._refresh()
+
+    def _refresh(self):
+        def work():
+            blips, n = [], 0
+            try:
+                for c in psutil.net_connections(kind="tcp"):
+                    if c.status != "ESTABLISHED" or not c.raddr:
+                        continue
+                    n += 1
+                    ip, port = c.raddr.ip, c.raddr.port
+                    h = sum(ord(ch) * (i + 1) for i, ch in enumerate(ip)) % 360
+                    d = 0.25 + 0.7 * ((port * 2654435761) % 1000) / 1000.0
+                    local = ip.startswith(("127.", "::1", "192.168.", "10.", "172."))
+                    blips.append((math.radians(h), d, local))
+            except Exception:
+                pass
+            self._blips, self._count = blips[:60], n
+        threading.Thread(target=work, daemon=True).start()
+
+    def _tick(self):
+        self._a = (self._a + 0.06) % math.tau
+        if self.isVisible():
+            self.update()
+
+    def paintEvent(self, _):
+        p = QPainter(self)
+        if not p.isActive():
+            return
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        W, H = self.width(), self.height()
+        r = min(W, H) / 2 - 6
+        cx, cy = W / 2, H / 2
+        g = QRadialGradient(cx, cy, r)
+        g.setColorAt(0, QColor(10, 34, 110, 200)); g.setColorAt(1, QColor(2, 8, 36, 220))
+        p.setBrush(QBrush(g)); p.setPen(QPen(qcol(C.BORDER_B), 1))
+        p.drawEllipse(QPointF(cx, cy), r, r)
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.setPen(QPen(qcol(C.BORDER), 1))
+        for k in (0.33, 0.66):
+            p.drawEllipse(QPointF(cx, cy), r * k, r * k)
+        p.drawLine(QLineF(cx - r, cy, cx + r, cy)); p.drawLine(QLineF(cx, cy - r, cx, cy + r))
+        # sweep wedge
+        cg = QConicalGradient(cx, cy, -math.degrees(self._a))
+        cg.setColorAt(0.0, QColor(79, 220, 255, 150)); cg.setColorAt(0.12, QColor(79, 220, 255, 0))
+        cg.setColorAt(1.0, QColor(79, 220, 255, 0))
+        p.setPen(Qt.PenStyle.NoPen); p.setBrush(QBrush(cg))
+        p.drawEllipse(QPointF(cx, cy), r, r)
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.setPen(QPen(qcol(C.PRI), 1.5))
+        p.drawLine(QLineF(cx, cy, cx + math.cos(self._a) * r, cy + math.sin(self._a) * r))
+        # blips glow just after the beam passes them
+        for ang, d, local in self._blips:
+            since = (self._a - ang) % math.tau
+            glow = max(0.25, 1.0 - since / math.tau * 1.6)
+            col = qcol(C.GREEN if local else C.ACC2)
+            col.setAlphaF(glow)
+            p.setPen(Qt.PenStyle.NoPen); p.setBrush(col)
+            p.drawEllipse(QPointF(cx + math.cos(ang) * r * d, cy + math.sin(ang) * r * d), 2.6, 2.6)
+        p.setFont(QFont(FONT_MONO, 7)); p.setPen(QPen(qcol(C.TEXT_MED), 1))
+        p.drawText(QRectF(4, H - 16, W - 8, 14), Qt.AlignmentFlag.AlignRight, f"{self._count} LINKS")
+        p.end()
+
 
 class MetricBar(QWidget):
 
@@ -2427,7 +2511,8 @@ class ConfirmBanner(_HudOverlay):
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setStyleSheet(f"""
             ConfirmBanner {{
-                background: rgba(14, 3, 0, 250);
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 rgba(40, 14, 4, 252), stop:1 rgba(3, 8, 34, 252));
                 border: 1px solid {C.ACC};
                 border-radius: 6px;
             }}
@@ -2438,10 +2523,21 @@ class ConfirmBanner(_HudOverlay):
         lay.setContentsMargins(20, 16, 20, 16)
         lay.setSpacing(8)
 
-        hdr = QLabel("⚠  CONFIRM")
-        hdr.setFont(QFont(FONT_MONO, 11, QFont.Weight.Bold))
+        hdr = QLabel("⚠  APPROVAL REQUIRED")
+        hdr.setFont(QFont(FONT_DISPLAY, 10, QFont.Weight.Black))
         hdr.setStyleSheet(f"color: {C.ACC}; background: transparent;")
         lay.addWidget(hdr)
+
+        # Risk meter for actions screened by core/safety.py ("Risk N/7 — …")
+        import re as _re
+        _m = _re.match(r"Risk (\d)/7", detail or "")
+        if _m:
+            lvl = int(_m.group(1))
+            col = C.RED if lvl >= 6 else C.ACC
+            meter = QLabel("RISK  " + "■" * lvl + "□" * (7 - lvl) + f"  {lvl}/7")
+            meter.setFont(QFont(FONT_MONO, 9))
+            meter.setStyleSheet(f"color: {col}; background: transparent;")
+            lay.addWidget(meter)
 
         ttl = QLabel(title)
         ttl.setWordWrap(True)
@@ -4101,7 +4197,7 @@ class MainWindow(QMainWindow):
 
     def _build_header(self) -> QWidget:
         w = QWidget()
-        w.setFixedHeight(62)
+        w.setFixedHeight(68)
         w.setObjectName("Header")
         w.setStyleSheet(f"QWidget#Header {{ background: {GRAD_BAR}; border-bottom: 1px solid {C.BORDER_B}; }}")
         lay = QHBoxLayout(w)
@@ -4133,11 +4229,11 @@ class MainWindow(QMainWindow):
         lay.addWidget(self._drawer_btn)
         lay.addStretch()
 
-        mid = QVBoxLayout(); mid.setSpacing(1)
+        mid = QVBoxLayout(); mid.setSpacing(0); mid.setContentsMargins(0, 6, 0, 6)
         _disp = self._assistant_name.upper()
         self._title_lbl = QLabel(_disp)
         self._title_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        _tf = QFont(FONT_DISPLAY, 17, QFont.Weight.Black)
+        _tf = QFont(FONT_DISPLAY, 15, QFont.Weight.Black)
         _tf.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 7)
         self._title_lbl.setFont(_tf)
         self._title_lbl.setStyleSheet(f"color: {C.WHITE}; background: transparent; border: none;")
@@ -4229,7 +4325,21 @@ class MainWindow(QMainWindow):
         ip_lay.addWidget(os_lbl)
 
         lay.addWidget(info_panel)
-        lay.addSpacing(4)
+        lay.addSpacing(6)
+
+        mh = QLabel("◈ AI MODELS · AUTO-ROUTE")
+        mh.setFont(QFont(FONT_MONO, 7, QFont.Weight.Bold))
+        mh.setStyleSheet(f"color: {C.PRI}; background: transparent; border: none;"
+                         f" border-bottom: 1px solid {C.BORDER}; padding-bottom: 3px;")
+        lay.addWidget(mh)
+        self._models_lbl = QLabel("")
+        self._models_lbl.setWordWrap(True)
+        self._models_lbl.setTextFormat(Qt.TextFormat.RichText)
+        self._models_lbl.setFont(QFont(FONT_MONO, 7))
+        self._models_lbl.setStyleSheet(f"color: {C.TEXT}; background: rgba(2, 8, 36, 140);"
+                                       f" border: 1px solid {C.BORDER}; padding: 5px;")
+        lay.addWidget(self._models_lbl)
+        QTimer.singleShot(0, self._refresh_models_panel)
 
         lay.addStretch()
 
@@ -4262,6 +4372,10 @@ class MainWindow(QMainWindow):
             l.setFont(QFont(FONT_MONO, 7, QFont.Weight.Bold))
             l.setStyleSheet(f"color: {C.TEXT_MED}; background: transparent;")
             return l
+
+        lay.addWidget(_sec("NETWORK RADAR"))
+        self._radar = RadarWidget()
+        lay.addWidget(self._radar)
 
         lay.addWidget(_sec("ACTIVITY LOG"))
         self._log = LogWidget()
@@ -5791,11 +5905,29 @@ class MainWindow(QMainWindow):
             + ("Gemini Live" if _M.voice_engine() == "gemini_live" else "speech pipeline")
             + f" · code → {_M.describe('code')} · smart → {_M.describe('smart')}")
         self._update_engine_label()
+        self._refresh_models_panel()
         if voice_changed and self.on_voice_change:
             try:
                 self.on_voice_change()
             except Exception:
                 pass
+
+    def _refresh_models_panel(self):
+        lbl = getattr(self, "_models_lbl", None)
+        if lbl is None:
+            return
+        try:
+            from core import models as _M
+            rows = [("VOICE", "Gemini Live" if _M.voice_engine() == "gemini_live" else "pipeline", C.PRI)]
+            for role, col in (("chat", C.GREEN), ("smart", C.GREEN), ("code", C.ACC2),
+                              ("vision", "#b58cff"), ("stt", C.TEXT_MED)):
+                d = _M.describe(role)
+                rows.append((role.upper(), d.split(" / ", 1)[-1] if d != "none" else "—", col))
+            lbl.setText("<br>".join(
+                f"<span style='color:{c}'>{r:<6}</span> {m[:22]}".replace(" ", "&nbsp;", 6)
+                for r, m, c in rows))
+        except Exception:
+            lbl.setText("—")
 
     def _update_engine_label(self):
         try:
@@ -5820,6 +5952,7 @@ class MainWindow(QMainWindow):
             self._overlay.hide()
             self._overlay = None
         self._update_engine_label()
+        self._refresh_models_panel()
         self._apply_state("LISTENING")
         self._assistant_name = _read_full_config().get("assistant_name", "JARVIS") or "JARVIS"
         self._log.append_log(f"SYS: Initialised. OS={os_name.upper()}. {self._assistant_name} online.")

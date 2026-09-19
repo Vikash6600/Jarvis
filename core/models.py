@@ -111,8 +111,10 @@ def guess_tags(provider_id: str, model: str) -> list[str]:
     m = model.lower()
     tags: list[str] = []
     if "whisper" in m or "transcrib" in m:
-        return ["stt"]
-    if any(k in m for k in ("embed", "tts", "dall-e", "image-gen", "moderation", "guard")):
+        return ["stt"] if provider_id != "gemini" else ["other"]
+    if any(k in m for k in ("embed", "tts", "dall-e", "image", "moderation", "guard", "computer-use",
+                            "robotics", "aqa", "learnlm", "veo", "imagen", "lyria", "search-preview",
+                            "realtime", "audio-preview")):
         return ["other"]
     if any(k in m for k in ("coder", "codestral", "code", "deepseek", "claude", "gpt-4.1", "grok-4")):
         tags.append("code")
@@ -252,7 +254,7 @@ def candidates(role: str) -> list[tuple[dict, str]]:
     for p, m, tags in all_models():
         if "other" in tags or "live" in tags:
             continue
-        if role == "stt" and "stt" not in tags:
+        if role == "stt" and ("stt" not in tags or p.get("kind") == "gemini"):
             continue
         if role != "stt" and "stt" in tags:
             continue
@@ -278,6 +280,15 @@ def describe(role: str) -> str:
 
 
 # ── network helpers ──────────────────────────────────────────────────────────
+GEMINI_OPENAI_URL = "https://generativelanguage.googleapis.com/v1beta/openai"
+
+
+def _base(p: dict) -> str:
+    if p.get("kind") == "gemini":
+        return GEMINI_OPENAI_URL
+    return p.get("base_url", "").rstrip("/")
+
+
 def _headers(p: dict) -> dict:
     h = {"Content-Type": "application/json"}
     key = p.get("api_key") or ""
@@ -339,7 +350,7 @@ def chat(p: dict, model: str, messages: list, timeout: float = 60.0, **extra) ->
     """One OpenAI-style /chat/completions call. Returns the raw JSON."""
     body = {"model": model, "messages": messages}
     body.update({k: v for k, v in extra.items() if v is not None})
-    url = p.get("base_url", "").rstrip("/") + "/chat/completions"
+    url = _base(p) + "/chat/completions"
     r = requests.post(url, headers=_headers(p), json=body, timeout=timeout)
     if r.status_code == 429:
         cool(p, model)

@@ -2048,6 +2048,177 @@ class ModelHubOverlay(QWidget):
         self.closed.emit()
 
 
+
+_STATUS_COL = {
+    "planning": "#4fdcff", "executing": "#2bff9a", "reviewing": "#2bff9a", "queued": "#a9c1f5",
+    "awaiting_plan_approval": "#ffb02e", "waiting_approval": "#ffb02e", "waiting_user": "#ffb02e",
+    "scheduled": "#b58cff", "paused": "#6f8fd8", "done": "#2bff9a", "failed": "#ff3b4e", "cancelled": "#6f8fd8",
+}
+_STATUS_TXT = {"awaiting_plan_approval": "PLAN READY", "waiting_approval": "NEEDS OK",
+               "waiting_user": "QUESTION", "executing": "BUILDING"}
+
+
+class MissionsPanel(QWidget):
+    """Compact list of missions: title, status chip, progress bar, last log line.
+    Click a row to open its brief."""
+    opened = pyqtSignal(str)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._rows: list[dict] = []
+        self.setMinimumHeight(40)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setMouseTracking(True)
+
+    def set_missions(self, ms) -> None:
+        rows = []
+        for m in ms:
+            d, n = m.progress
+            rows.append({"id": m.id, "title": m.title, "status": m.status, "d": d, "n": n,
+                         "last": (m.log[-1]["msg"] if m.log else "")})
+        self._rows = rows[-5:][::-1]
+        self.setFixedHeight(max(34, 46 * len(self._rows)) if self._rows else 34)
+        self.update()
+
+    def mousePressEvent(self, e):
+        i = int(e.position().y() // 46)
+        if 0 <= i < len(self._rows):
+            self.opened.emit(self._rows[i]["id"])
+
+    def paintEvent(self, _):
+        p = QPainter(self)
+        if not p.isActive():
+            return
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        W = self.width()
+        if not self._rows:
+            p.setFont(QFont(FONT_MONO, 8)); p.setPen(QPen(qcol(C.TEXT_DIM), 1))
+            p.drawText(QRectF(0, 0, W, 30), Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
+                       "  No missions — say “Jarvis, build …”")
+            p.end(); return
+        for i, r in enumerate(self._rows):
+            y = i * 46
+            col = QColor(_STATUS_COL.get(r["status"], C.TEXT_MED))
+            p.setPen(QPen(qcol(C.BORDER), 1)); p.setBrush(QColor(4, 12, 46, 170))
+            p.drawRect(QRectF(0.5, y + 0.5, W - 1, 42))
+            p.fillRect(QRectF(0, y, 3, 43), col)
+            p.setFont(QFont(FONT_MONO, 8, QFont.Weight.Bold)); p.setPen(QPen(qcol(C.WHITE), 1))
+            p.drawText(QRectF(10, y + 3, W - 110, 16), Qt.AlignmentFlag.AlignLeft,
+                       f"#{r['id']} {r['title']}"[:44])
+            p.setFont(QFont(FONT_MONO, 7)); p.setPen(QPen(col, 1))
+            chip = _STATUS_TXT.get(r["status"], r["status"].upper())
+            p.drawText(QRectF(W - 100, y + 3, 94, 16), Qt.AlignmentFlag.AlignRight, chip)
+            if r["n"]:
+                bw = W - 20
+                p.fillRect(QRectF(10, y + 21, bw, 3), qcol(C.BAR_BG))
+                p.fillRect(QRectF(10, y + 21, bw * r["d"] / r["n"], 3), col)
+            p.setPen(QPen(qcol(C.TEXT_MED), 1))
+            p.drawText(QRectF(10, y + 26, W - 20, 14), Qt.AlignmentFlag.AlignLeft,
+                       (r["last"] or "")[:70])
+        p.end()
+
+
+class MissionBriefOverlay(QWidget):
+    """The plan, full screen-ish, with APPROVE / REVISE / CANCEL — nothing is
+    built until the user approves. Also used to read a finished mission."""
+
+    def __init__(self, mission, control, parent=None):
+        super().__init__(parent)
+        self._m, self._mc = mission, control
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setObjectName("Brief")
+        self.setStyleSheet(f"""
+            QWidget#Brief {{ background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                stop:0 rgba(9, 28, 96, 250), stop:1 rgba(1, 4, 22, 252));
+                border: 1px solid {C.PRI}; border-radius: 4px; }}
+            QLabel {{ background: transparent; border: none; }}
+            QTextEdit {{ background: rgba(2, 8, 36, 170); color: {C.TEXT}; border: 1px solid {C.BORDER_B};
+                padding: 10px; selection-background-color: {C.BORDER_B}; }}
+            QLineEdit {{ background: #030a2c; color: {C.WHITE}; border: 1px solid {C.BORDER_B};
+                border-bottom: 2px solid {C.PRI_DIM}; padding: 4px 8px; }}
+        """)
+        v = QVBoxLayout(self); v.setContentsMargins(22, 16, 22, 16); v.setSpacing(10)
+        top = QHBoxLayout()
+        col = QVBoxLayout(); col.setSpacing(0)
+        crumb = QLabel(f"MISSION #{mission.id} · {_STATUS_TXT.get(mission.status, mission.status.upper())}")
+        crumb.setFont(QFont(FONT_MONO, 8)); crumb.setStyleSheet(f"color: {C.ACC2};")
+        tf = QFont(FONT_DISPLAY, 14, QFont.Weight.Black)
+        tf.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 3)
+        title = QLabel(mission.title.upper()); title.setFont(tf); title.setStyleSheet(f"color: {C.WHITE};")
+        col.addWidget(crumb); col.addWidget(title)
+        top.addLayout(col, 1)
+        x = QPushButton("✕"); x.setFixedSize(34, 34); x.setCursor(Qt.CursorShape.PointingHandCursor)
+        x.setStyleSheet(f"QPushButton {{ background: transparent; color: {C.TEXT_MED}; border: 1px solid {C.BORDER_B}; }}")
+        x.clicked.connect(self.close_brief)
+        top.addWidget(x, 0, Qt.AlignmentFlag.AlignTop)
+        v.addLayout(top)
+
+        body = QTextEdit(); body.setReadOnly(True); body.setFont(QFont(FONT_BODY, 11))
+        md = mission.plan or "_The plan is being prepared…_"
+        if mission.status == "done" and mission.result:
+            md = f"## Result\n{mission.result}\n\n---\n" + md
+        if mission.pending_question:
+            md = f"## Question for you\n**{mission.pending_question}**\n\n---\n" + md
+        md += "\n\n---\n**Workspace:** `" + mission.workspace + "`"
+        body.setMarkdown(md)
+        v.addWidget(body, 1)
+
+        self._fb = QLineEdit()
+        self._fb.setFont(QFont(FONT_MONO, 9))
+        self._fb.setPlaceholderText("Changes you want (e.g. 'darker theme, add online ordering')"
+                                    if mission.status == "awaiting_plan_approval" else
+                                    "Your answer…" if mission.status == "waiting_user" else "")
+        self._fb.setVisible(mission.status in ("awaiting_plan_approval", "waiting_user"))
+        v.addWidget(self._fb)
+
+        row = QHBoxLayout(); row.setSpacing(8)
+        self._status = QLabel(""); self._status.setFont(QFont(FONT_MONO, 8))
+        self._status.setStyleSheet(f"color: {C.TEXT_MED};")
+        row.addWidget(self._status, 1)
+
+        def btn(txt, primary, fn):
+            b = QPushButton(txt); b.setFixedHeight(38); b.setMinimumWidth(130)
+            f = QFont(FONT_DISPLAY, 9, QFont.Weight.Black); f.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 2)
+            b.setFont(f); b.setCursor(Qt.CursorShape.PointingHandCursor)
+            b.setStyleSheet(f"QPushButton {{ background: {C.PRI}; color: #030a2c; border: none; }}"
+                            f" QPushButton:hover {{ background: {C.WHITE}; }}" if primary else
+                            f"QPushButton {{ background: transparent; color: {C.PRI}; border: 1px solid {C.PRI_DIM}; }}"
+                            f" QPushButton:hover {{ border-color: {C.PRI}; }}")
+            b.clicked.connect(fn); row.addWidget(b)
+        if mission.status == "awaiting_plan_approval":
+            btn("CANCEL", False, lambda: self._do(lambda: control.cancel(self._m)))
+            btn("REVISE", False, self._revise)
+            btn("APPROVE ▸", True, lambda: self._do(lambda: control.approve(self._m)))
+        elif mission.status == "waiting_user":
+            btn("SEND ANSWER ▸", True, lambda: self._do(lambda: control.answer(self._m, self._fb.text())))
+        elif mission.status in ("paused", "failed"):
+            btn("CANCEL", False, lambda: self._do(lambda: control.cancel(self._m)))
+            btn("RESUME ▸", True, lambda: self._do(lambda: control.resume(self._m)))
+        elif mission.status not in ("done", "cancelled"):
+            btn("PAUSE", False, lambda: self._do(lambda: control.pause(self._m)))
+        btn("OPEN FOLDER", False, lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(mission.workspace)))
+        v.addLayout(row)
+
+    def _revise(self):
+        fb = self._fb.text().strip()
+        if not fb:
+            self._status.setText("Type the changes you want first."); self._status.setStyleSheet(f"color: {C.RED};")
+            return
+        self._do(lambda: self._mc.revise(self._m, fb))
+
+    def _do(self, fn):
+        try:
+            msg = fn()
+        except Exception as e:
+            msg = f"failed: {e}"
+        self._status.setText(msg or "")
+        QTimer.singleShot(700, self.close_brief)
+
+    def close_brief(self):
+        self.hide(); self.deleteLater()
+
+
 class HueWheel(QWidget):
     """
     Circular colour picker. The user drags the handle (small white circle)
@@ -3495,6 +3666,8 @@ class MainWindow(QMainWindow):
     _quiz_sig       = pyqtSignal(str, object, object)  # (topic, questions, grader)
     _quiz_hide_sig  = pyqtSignal()
     _review_sig     = pyqtSignal(str, str, object, object)  # document review payload
+    _missions_sig   = pyqtSignal()           # mission store changed (any thread)
+    _brief_sig      = pyqtSignal(str)        # open a mission's brief (any thread)
 
     def __init__(self, face_path: str):
         super().__init__()
@@ -3658,6 +3831,9 @@ class MainWindow(QMainWindow):
         self._quiz_sig.connect(self._show_quiz)
         self._quiz_hide_sig.connect(self._hide_quiz)
         self._review_sig.connect(self._show_review)
+        self._missions_sig.connect(self._refresh_missions)
+        self._brief_sig.connect(self._open_mission)
+        self.missions = None
         self._cam_stop = threading.Event()
 
         # Camera preview overlay (child of central widget, positioned in resizeEvent)
@@ -4376,6 +4552,11 @@ class MainWindow(QMainWindow):
         lay.addWidget(_sec("NETWORK RADAR"))
         self._radar = RadarWidget()
         lay.addWidget(self._radar)
+
+        lay.addWidget(_sec("MISSIONS"))
+        self._missions_panel = MissionsPanel()
+        self._missions_panel.opened.connect(self._open_mission)
+        lay.addWidget(self._missions_panel)
 
         lay.addWidget(_sec("ACTIVITY LOG"))
         self._log = LogWidget()
@@ -5912,6 +6093,31 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
 
+    def _refresh_missions(self):
+        mc = getattr(self, "missions", None)
+        if mc is None:
+            return
+        ms = [m for m in mc.store.all() if m.status != "cancelled"]
+        self._missions_panel.set_missions(ms)
+
+    def _open_mission(self, mid: str):
+        mc = getattr(self, "missions", None)
+        if mc is None:
+            return
+        m = mc.store.get(mid)
+        if m is None:
+            return
+        old = getattr(self, "_brief", None)
+        if old is not None:
+            try:
+                old.close_brief()
+            except Exception:
+                pass
+        ov = MissionBriefOverlay(m, mc, self.centralWidget())
+        self._place_hub(ov)
+        ov.show(); ov.raise_()
+        self._brief = ov
+
     def _refresh_models_panel(self):
         lbl = getattr(self, "_models_lbl", None)
         if lbl is None:
@@ -6102,6 +6308,23 @@ class JarvisUI:
     @on_clap_sensitivity.setter
     def on_clap_sensitivity(self, cb):
         self._win.on_clap_sensitivity = cb
+
+    @property
+    def missions(self):
+        return self._win.missions
+
+    @missions.setter
+    def missions(self, mc):
+        self._win.missions = mc
+        self._win._missions_sig.emit()
+
+    def missions_changed(self) -> None:
+        """Thread-safe: refresh the MISSIONS panel."""
+        self._win._missions_sig.emit()
+
+    def show_mission_plan(self, mid: str) -> None:
+        """Thread-safe: open the Mission Brief overlay (plan approval)."""
+        self._win._brief_sig.emit(mid)
 
     def clap_pulse(self) -> None:
         """Thread-safe: ripple the globe when a double clap is heard."""

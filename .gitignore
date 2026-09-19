@@ -62,3 +62,7 @@ config/.jarvis.lock
 config/.wake_request
 config/.clap_launcher.pid
 config/clap_launcher.log
+
+# Missions state (your tasks, plans and history)
+memory/missions.json
+memory/missions.tmp

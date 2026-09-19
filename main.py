@@ -283,6 +283,18 @@ def _render_prompt(template: str, values: dict) -> str:
     return out
 
 
+def _mission_user_name() -> str:
+    try:
+        from memory.config_manager import get_user_name
+        return get_user_name() or "sir"
+    except Exception:
+        return "sir"
+
+
+MISSION_TOOLS = {"start_mission", "list_missions", "mission_status", "approve_plan", "revise_plan",
+                 "answer_mission", "pause_mission", "resume_mission", "cancel_mission"}
+
+
 def _read_cfg_value(key: str, default=None):
     try:
         return json.loads((BASE_DIR / "config" / "api_keys.json").read_text(encoding="utf-8")).get(key, default)
@@ -329,6 +341,40 @@ def _clean_transcript(text: str) -> str:
     return text.strip()
 
 TOOL_DECLARATIONS = [
+    # ── Missions (core/agent.py): long tasks Jarvis works on in the background ─
+    {
+        "name": "start_mission",
+        "description": (
+            "Start a background MISSION for any substantial or multi-step job: building a website or app, "
+            "a coding project, research/report, planning something, organising files, a long errand. "
+            "Jarvis researches, writes a full plan for the user to approve on the HUD, then builds it and "
+            "reports back — the conversation stays free meanwhile. Also creates RECURRING ROUTINES when a "
+            "schedule is given ('every 30 min', 'daily 08:00', 'weekdays 18:30'). Reply briefly that you are on it."
+        ),
+        "parameters": {"type": "OBJECT", "properties": {
+            "goal": {"type": "STRING", "description": "The full request in the user's words, with every detail they gave."},
+            "kind": {"type": "STRING", "description": "website | code | research | general"},
+            "schedule": {"type": "STRING", "description": "Only for recurring routines, e.g. 'every 2 hours', 'daily 8:00'."},
+        }, "required": ["goal"]},
+    },
+    {"name": "list_missions", "description": "List Jarvis's missions and routines with their status.",
+     "parameters": {"type": "OBJECT", "properties": {}}},
+    {"name": "mission_status", "description": "Detailed status, progress and latest log of a mission (default: the latest).",
+     "parameters": {"type": "OBJECT", "properties": {"mission_id": {"type": "STRING"}}}},
+    {"name": "approve_plan", "description": "The user approves a mission's plan (optionally with changes, which triggers a revision).",
+     "parameters": {"type": "OBJECT", "properties": {"mission_id": {"type": "STRING"}, "changes": {"type": "STRING"}}}},
+    {"name": "revise_plan", "description": "The user wants changes to a mission's plan before it is built.",
+     "parameters": {"type": "OBJECT", "properties": {"mission_id": {"type": "STRING"}, "feedback": {"type": "STRING"}},
+                    "required": ["feedback"]}},
+    {"name": "answer_mission", "description": "Give the answer to a question a mission asked.",
+     "parameters": {"type": "OBJECT", "properties": {"mission_id": {"type": "STRING"}, "answer": {"type": "STRING"}},
+                    "required": ["answer"]}},
+    {"name": "pause_mission", "description": "Pause a mission.",
+     "parameters": {"type": "OBJECT", "properties": {"mission_id": {"type": "STRING"}}}},
+    {"name": "resume_mission", "description": "Resume a paused or failed mission.",
+     "parameters": {"type": "OBJECT", "properties": {"mission_id": {"type": "STRING"}}}},
+    {"name": "cancel_mission", "description": "Cancel a mission or stop a routine.",
+     "parameters": {"type": "OBJECT", "properties": {"mission_id": {"type": "STRING"}}}},
     # ── Inline tools ─────────────────────────────────────────────────────────
     # These stay here (rather than in an actions/*.py TOOL dict) because their
     # handling is woven into live-session state — vision capture/injection,
@@ -636,6 +682,7 @@ class JarvisLive:
         self.ui.get_plugins = self._plugin_registry.list_for_ui
         self.ui.get_plugin_settings = self._plugin_registry.settings_schemas  # ⚙ settings tab
         self.ui.request_say = self.plugin_say   # plugins: mid-task speech channel
+        self._init_missions()
 
         # ── Wake word ────────────────────────────────────────────────────────
         # _awake gates the mic (see _listen_audio) and the background speakers.
@@ -816,6 +863,110 @@ class JarvisLive:
         # what they are waiting to see.
         return wake_install(logger=lambda m: print(f"[Wake] {m}"),
                             notify=lambda m: self.ui.write_log(f"SYS: {m}"))
+
+    # ── Missions ─────────────────────────────────────────────────────────────
+    def _init_missions(self) -> None:
+        from collections import deque
+        from core.agent import MissionControl
+        from core.missions import MissionStore
+        from core import notify
+        self._announce_q = deque(maxlen=20)
+        decls = (self._action_registry.get_tool_declarations()
+                 + self._plugin_registry.get_tool_declarations())
+
+        def run_tool(name, args):
+            if self._action_registry.has(name):
+                return self._action_registry.run(name, args, {"player": self.ui, "speak": None,
+                                                              "response": None, "session_memory": None})
+            if self._plugin_registry.has(name):
+                return self._plugin_registry.run(name, args, player=self.ui, session_memory=None)
+            return f"Unknown tool {name}"
+
+        def announce(text, important):
+            self.ui.write_log(f"MISSION: {text}")
+            if important:
+                self._announce_q.append(text)
+            try:
+                if getattr(self, "_telegram", None):
+                    self._telegram.push(text, important)
+            except Exception:
+                pass
+
+        def notify_hook(title, msg):
+            notify.toast(title, msg)
+
+        self.missions = MissionControl(
+            MissionStore(), run_tool, decls,
+            hooks={"announce": announce,
+                   "changed": lambda m: self.ui.missions_changed(),
+                   "notify": notify_hook,
+                   "show_plan": lambda m: self.ui.show_mission_plan(m.id)},
+            user_name=_mission_user_name())
+        self.ui.missions = self.missions
+        self.missions.start()
+
+    def _mission_tool(self, name: str, args: dict) -> str:
+        mc = self.missions
+        st = mc.store
+        if name == "start_mission":
+            kind = str(args.get("kind") or "general").lower()
+            m = mc.create(str(args.get("goal", "")), kind=kind, schedule=str(args.get("schedule") or ""))
+            if m.schedule:
+                return f"Routine #{m.id} scheduled ({m.schedule}). Confirm briefly."
+            return (f"Mission #{m.id} started in the background: researching, then a plan will appear on the "
+                    f"HUD for approval. Tell the user in one short sentence that you are on it.")
+        if name == "list_missions":
+            ms = [m for m in st.all() if m.status not in ("cancelled",)][-12:]
+            return "\n".join(m.short() for m in ms) or "No missions yet."
+        mid = str(args.get("mission_id") or "")
+        m = st.get(mid) if mid else (st.latest(("awaiting_plan_approval",)) if name in ("approve_plan", "revise_plan")
+                                     else st.latest(("waiting_user",)) if name == "answer_mission"
+                                     else st.latest())
+        if m is None:
+            return "I couldn't find that mission."
+        if name == "mission_status":
+            d, n = m.progress
+            last = " | ".join(e["msg"] for e in m.log[-4:])
+            q = f" Waiting for your answer: {m.pending_question}" if m.pending_question else ""
+            return f"{m.short()} (steps {d}/{n}). Latest: {last}.{q} Result: {m.result[:300]}"
+        if name == "approve_plan":
+            return mc.approve(m, str(args.get("changes") or ""))
+        if name == "revise_plan":
+            return mc.revise(m, str(args.get("feedback") or ""))
+        if name == "answer_mission":
+            return mc.answer(m, str(args.get("answer") or ""))
+        if name == "pause_mission":
+            return mc.pause(m)
+        if name == "resume_mission":
+            return mc.resume(m)
+        if name == "cancel_mission":
+            return mc.cancel(m)
+        return "Unknown mission command."
+
+    async def _run_mission_announcer(self) -> None:
+        """Speak important mission updates — only when Jarvis is idle, awake,
+        and the user has not spoken for a few seconds."""
+        while True:
+            await asyncio.sleep(2.0)
+            q = getattr(self, "_announce_q", None)
+            if not q or not self.session or not self._awake:
+                continue
+            with self._speaking_lock:
+                if self._is_speaking:
+                    continue
+            if time.monotonic() - getattr(self, "_last_user_speech", 0) < 8:
+                continue
+            items = []
+            while q and len(items) < 3:
+                items.append(q.popleft())
+            try:
+                await self.session.send_client_content(
+                    turns={"role": "user", "parts": [{"text":
+                        "[MISSION_UPDATE] Tell the user briefly and naturally, in one or two sentences: "
+                        + " / ".join(items)}]},
+                    turn_complete=True)
+            except Exception as e:
+                print(f"[Missions] announce failed: {e}")
 
     def plugin_say(self, instruction: str) -> None:
         """
@@ -1306,6 +1457,9 @@ class JarvisLive:
                     _os._exit(0)
                 asyncio.create_task(_do_shutdown())
 
+            elif name in MISSION_TOOLS:
+                result = await loop.run_in_executor(None, lambda: self._mission_tool(name, args))
+
             elif self._action_registry.has(name):
                 # file_processor: fall back to the currently-uploaded file when none is given
                 if name == "file_processor" and not args.get("file_path") and self.ui.current_file:
@@ -1539,6 +1693,19 @@ class JarvisLive:
             self._vision_busy = False
         return True
 
+    async def _dispatch_tools(self, calls, session) -> None:
+        fn_responses = []
+        try:
+            for fc in calls:
+                print(f"[JARVIS] 📞 {fc.name}")
+                fn_responses.append(await self._execute_tool(fc))
+            if session is not None and session is self.session:
+                await session.send_tool_response(function_responses=fn_responses)
+                await self._flush_pending_vision()
+        except Exception as e:
+            print(f"[JARVIS] ❌ Tool dispatch: {e}")
+            traceback.print_exc()
+
     async def _receive_audio(self):
         print("[JARVIS] 👂 Recv started")
         out_buf, in_buf = [], []
@@ -1654,15 +1821,13 @@ class JarvisLive:
                                 asyncio.create_task(_cam_close())
 
                     if response.tool_call:
-                        fn_responses = []
-                        for fc in response.tool_call.function_calls:
-                            print(f"[JARVIS] 📞 {fc.name}")
-                            fr = await self._execute_tool(fc)
-                            fn_responses.append(fr)
-                        await self.session.send_tool_response(
-                            function_responses=fn_responses
-                        )
-                        await self._flush_pending_vision()
+                        # Run the tools off the receive loop: a long tool (a
+                        # build, a download) must never freeze audio, transcripts
+                        # or the user's ability to interrupt. The response is sent
+                        # when the tools finish — to the same session, if it is
+                        # still the live one.
+                        asyncio.create_task(self._dispatch_tools(
+                            list(response.tool_call.function_calls), self.session))
         except Exception as e:
             print(f"[JARVIS] ❌ Recv: {e}")
             traceback.print_exc()
@@ -2148,6 +2313,10 @@ class JarvisLive:
         # Enumerate audio devices off-thread. The settings drawer must never pay
         # for host-API enumeration on the Qt thread.
         audio_devices.prefetch()
+
+        # Mission updates are spoken whenever Jarvis is idle — for the whole
+        # lifetime, independent of the dashboard and of reconnects.
+        asyncio.create_task(self._run_mission_announcer())
 
         # Start dashboard (optional — needs: pip install fastapi "uvicorn[standard]" cryptography)
         try:

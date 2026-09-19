@@ -41,9 +41,10 @@ def _base_dir() -> Path:
 
 CONFIG_FILE = _base_dir() / "config" / "api_keys.json"
 
-ROLES = ("chat", "fast", "smart", "code", "vision", "search", "stt")
+ROLES = ("agent", "chat", "fast", "smart", "code", "vision", "search", "stt")
 ROLE_LABELS = {
     "voice": ("VOICE ENGINE", "Live conversation"),
+    "agent": ("AGENT", "Missions: research, plan, build"),
     "chat": ("CHAT", "Brain for pipeline voice & typed chat"),
     "fast": ("FAST", "Quick lookups, parsing"),
     "smart": ("SMART", "Summaries, documents, planning"),
@@ -58,7 +59,7 @@ ROLE_LABELS = {
 PRESETS: dict[str, dict] = {
     "gemini": {"label": "Google Gemini", "kind": "gemini", "base_url": "",
                "hint": "AIza…", "url": "https://aistudio.google.com/apikey",
-               "models": ["gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite"]},
+               "models": ["gemini-pro-latest", "gemini-flash-latest", "gemini-flash-lite-latest"]},
     "openai": {"label": "OpenAI", "kind": "openai_compat", "base_url": "https://api.openai.com/v1",
                "hint": "sk-…", "url": "https://platform.openai.com/api-keys",
                "models": ["gpt-4.1", "gpt-4.1-mini", "gpt-4o", "gpt-4o-mini", "o4-mini", "whisper-1"]},
@@ -97,7 +98,8 @@ PRESET_ORDER = ("gemini", "openai", "anthropic", "groq", "openrouter", "deepseek
                 "mistral", "xai", "together", "ollama", "lmstudio", "custom")
 
 # Sensible preference when a role is on "auto" and several providers qualify.
-_PROVIDER_PREF = {"smart": ("anthropic", "openai", "gemini", "xai", "deepseek", "mistral", "groq", "openrouter"),
+_PROVIDER_PREF = {"agent": ("anthropic", "openai", "gemini", "xai", "deepseek", "mistral", "openrouter", "groq"),
+                  "smart": ("anthropic", "openai", "gemini", "xai", "deepseek", "mistral", "groq", "openrouter"),
                   "code": ("anthropic", "deepseek", "openai", "mistral", "xai", "gemini", "groq"),
                   "vision": ("gemini", "openai", "anthropic", "mistral", "xai"),
                   "fast": ("groq", "gemini", "openai", "anthropic", "mistral", "deepseek"),
@@ -127,6 +129,20 @@ def guess_tags(provider_id: str, model: str) -> list[str]:
     if "live" in m or "native-audio" in m:
         tags = ["live"]
     return tags or ["chat"]
+
+
+def _version(model: str) -> float:
+    """Newer first: '-latest' aliases win, then the highest version number
+    (providers retire old models, so the newest is the safest default)."""
+    m = model.lower()
+    if "latest" in m:
+        return 99.0
+    import re as _re
+    v = _re.search(r"(\d+(?:\.\d+)?)", m.split("/")[-1])
+    try:
+        return float(v.group(1)) if v else 0.0
+    except ValueError:
+        return 0.0
 
 
 # ── config ───────────────────────────────────────────────────────────────────
@@ -245,7 +261,8 @@ def candidates(role: str) -> list[tuple[dict, str]]:
     pinned = find(roles().get(role, "auto"))
     if pinned:
         out.append(pinned)
-    want = {"chat": ("chat", "reasoning", "fast", "code", "vision"),
+    want = {"agent": ("reasoning", "code", "chat"),
+            "chat": ("chat", "reasoning", "fast", "code", "vision"),
             "fast": ("fast",), "smart": ("reasoning",), "code": ("code",),
             "vision": ("vision",), "search": ("reasoning", "fast", "chat"),
             "stt": ("stt",)}.get(role, ("chat",))
@@ -263,9 +280,9 @@ def candidates(role: str) -> list[tuple[dict, str]]:
             continue
         pr = p.get("preset", p.get("id"))
         rank = pref.index(pr) if pr in pref else len(pref)
-        scored.append((-hit, rank, p, m))
-    scored.sort(key=lambda s: (s[0], s[1]))
-    for _h, _r, p, m in scored:
+        scored.append((-hit, rank, -_version(m), p, m))
+    scored.sort(key=lambda s: (s[0], s[1], s[2]))
+    for _h, _r, _v, p, m in scored:
         if (p, m) not in out:
             out.append((p, m))
     return out

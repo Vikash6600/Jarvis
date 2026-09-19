@@ -230,6 +230,21 @@ def _resolve_platform(platform_str: str):
     return lambda r, m: _desktop_send(platform_str.strip().title(), r, m)
 
 
+_SELF_WORDS = {"me", "myself", "my phone", "my telegram", "user", "the user", "sir", "self", "mine", ""}
+
+
+def _is_self(receiver: str) -> bool:
+    r = (receiver or "").strip().lower()
+    if r in _SELF_WORDS:
+        return True
+    try:
+        from memory.config_manager import get_user_name
+        name = (get_user_name() or "").strip().lower()
+        return bool(name) and r == name
+    except Exception:
+        return False
+
+
 def send_message(
     parameters: dict,
     response=None,
@@ -240,6 +255,14 @@ def send_message(
     receiver     = params.get("receiver", "").strip()
     message_text = params.get("message_text", "").strip()
     platform     = params.get("platform", "whatsapp").strip()
+
+    # "Ping me on Telegram" is the user's own paired bot, not the desktop app.
+    if _is_self(receiver) and platform.lower() in ("telegram", "tg", ""):
+        try:
+            from plugins.telegram_remote import run as _tg_send
+            return _tg_send({"text": message_text}, player=player)
+        except Exception as e:
+            return f"Could not reach your Telegram bot: {e}"
 
     if not receiver:
         return "Please specify a recipient."
@@ -269,7 +292,11 @@ def send_message(
 # ── Tool declaration (auto-discovered by core/action_loader.py) ──────────────
 TOOL = {
     "name": "send_message",
-    "description": "Sends a text message via WhatsApp, Telegram, or other messaging platform.",
+    "description": (
+        "Sends a message to ANOTHER PERSON (a contact) via WhatsApp, Telegram or another app by "
+        "controlling the desktop app. NEVER use this to message the user themself — for 'ping me', "
+        "'message me', 'text me', 'notify me', 'send it to my phone/Telegram' use telegram_send."
+    ),
     "parameters": {
         "type": "OBJECT",
         "properties": {

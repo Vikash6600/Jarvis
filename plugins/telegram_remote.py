@@ -7,9 +7,10 @@ from core import telegram_bridge
 PLUGIN = {
     "name": "telegram_send",
     "description": (
-        "Send a text message to the user's own phone via their paired Telegram bot "
-        "(e.g. 'send that to my phone', 'text me the link'). Not for messaging other people — "
-        "use send_message for that."
+        "ALWAYS use this when the user wants to be messaged themself: 'ping me', 'ping me on Telegram', "
+        "'message me', 'text me', 'notify me', 'remind me on my phone', 'send that to my phone / to "
+        "Telegram'. It sends instantly through the user's own paired Jarvis Telegram bot — do NOT open "
+        "the Telegram app or a browser for this. Only for messaging OTHER people use send_message."
     ),
     "parameters": {
         "type": "OBJECT",

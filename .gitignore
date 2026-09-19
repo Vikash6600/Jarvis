@@ -48,3 +48,6 @@ desktop.ini
 logs/
 downloads/
 screenshots/
+
+# Local bundled Python interpreter (not part of the project)
+/python/

@@ -2,6 +2,8 @@
 ### The Ultimate Cross-Platform Personal AI Assistant — By FatihMakes
 
 > 📺 **[Watch the full setup video on YouTube](https://www.youtube.com/@FatihMakes)**
+> **Modified version.** This repository is Vikash's fork of [MARK LIV by FatihMakes](https://github.com/FatihMakes/Mark-LIV), shared under the same CC BY-NC 4.0 license (non-commercial use only; see `LICENSE`). Changes from the original: a blue "mission control" HUD theme with an interactive 3D particle globe, bundled Orbitron / Share Tech Mono / Rajdhani fonts (SIL OFL, see `assets/fonts/`), and work in progress on multi-provider AI models and double-clap wake.
+
 
 A real-time voice AI that can hear, see, speak, and control your computer — on any OS. Supports Windows, macOS, and Linux. Built on the Gemini Live API for native audio streaming, delivering zero subscriptions and total digital autonomy.
 

@@ -361,8 +361,135 @@ def _live_call(contents, config, timeout_ms: int, key: str):
     return _Reply(text) if text else None
 
 
+# ── Multi-provider routing ───────────────────────────────────────────────────
+# core/models.py holds every configured provider and which model does which
+# job. `call()` asks it first: a job routed to an OpenAI-compatible model
+# (OpenAI, Claude, Groq, DeepSeek, Ollama, …) is answered here and returned as
+# a _Reply, so the ~25 call sites that only read `.text` never notice. A job
+# routed to Gemini falls through to the original ladder below, unchanged.
+
+def _items(contents):
+    return contents if isinstance(contents, (list, tuple)) else [contents]
+
+
+def _mime_of(item) -> str:
+    blob = getattr(item, "inline_data", None)
+    if blob is not None:
+        return str(getattr(blob, "mime_type", "") or "")
+    if isinstance(item, dict):
+        return str(item.get("mime_type") or (item.get("inline_data") or {}).get("mime_type") or "")
+    if hasattr(item, "save") and hasattr(item, "size"):      # PIL image
+        return "image/png"
+    return ""
+
+
+def _has(contents, prefix: str) -> bool:
+    return any(_mime_of(i).startswith(prefix) for i in _items(contents))
+
+
+def _to_openai_content(contents):
+    import base64
+    import io
+    parts = []
+    for item in _items(contents):
+        if isinstance(item, str):
+            parts.append({"type": "text", "text": item})
+            continue
+        mime = _mime_of(item)
+        data = None
+        if hasattr(item, "save") and hasattr(item, "size"):
+            buf = io.BytesIO()
+            item.save(buf, format="PNG")
+            data = buf.getvalue()
+        else:
+            blob = getattr(item, "inline_data", None)
+            if blob is not None:
+                data = getattr(blob, "data", None)
+            elif isinstance(item, dict):
+                data = item.get("data") or (item.get("inline_data") or {}).get("data")
+        if mime.startswith("image/") and data is not None:
+            b64 = data if isinstance(data, str) else base64.b64encode(data).decode("ascii")
+            parts.append({"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}})
+            continue
+        txt = getattr(item, "text", None) or (item.get("text") if isinstance(item, dict) else None)
+        if txt:
+            parts.append({"type": "text", "text": txt})
+    if parts and all(p["type"] == "text" for p in parts):
+        return "\n\n".join(p["text"] for p in parts)
+    return parts
+
+
+def _openai_call(prov: dict, model: str, contents, config, timeout_ms: int):
+    from core import models
+    system = ""
+    temp = None
+    if config is not None:
+        system = getattr(config, "system_instruction", None) or \
+            (config.get("system_instruction") if isinstance(config, dict) else "") or ""
+        temp = getattr(config, "temperature", None) if not isinstance(config, dict) else config.get("temperature")
+    msgs = []
+    if system:
+        msgs.append({"role": "system", "content": str(system)})
+    msgs.append({"role": "user", "content": _to_openai_content(contents)})
+    js = models.chat(prov, model, msgs, timeout=max(15.0, timeout_ms / 1000.0 + 20.0), temperature=temp)
+    text = ((js.get("choices") or [{}])[0].get("message") or {}).get("content") or ""
+    if isinstance(text, list):
+        text = "".join(t.get("text", "") for t in text if isinstance(t, dict))
+    text = str(text).strip()
+    return _Reply(text) if text else None
+
+
+def _route(contents, tier, config, timeout_ms):
+    """Returns a _Reply (answered by another provider), a tier/model string for
+    the Gemini ladder, or None when no configured model could answer."""
+    try:
+        from core import models
+    except Exception:
+        return tier
+    if tier == SEARCH:
+        return tier                    # grounding metadata only exists on Gemini
+    role = {FAST: "fast", SMART: "smart"}.get(tier, tier if tier in models.ROLES else None)
+    if role is None:
+        return tier                    # an explicit Gemini model name
+    if _has(contents, "audio/") or _has(contents, "video/"):
+        return SMART if models.has_gemini() else None
+    if _has(contents, "image/") and role in ("fast", "smart", "code"):
+        role = "vision"
+    gemini_tier = tier if tier in (FAST, SMART) else SMART
+    cands = models.candidates(role)
+    if not cands:
+        return gemini_tier if models.has_gemini() else None
+    pinned = models.roles().get(role, "auto")
+    for prov, model in cands:
+        if prov.get("kind") == "gemini":
+            if pinned == f"{prov.get('id')}/{model}":
+                return model
+            return gemini_tier
+        if models.cooling(prov, model):
+            continue
+        try:
+            reply = _openai_call(prov, model, contents, config, timeout_ms)
+            if reply is not None:
+                print(f"[Route] {role} → {prov.get('preset', prov.get('id'))}/{model}")
+                return reply
+        except Exception as e:
+            print(f"[Route] {prov.get('id')}/{model}: {str(e)[:160]}")
+    return gemini_tier if models.has_gemini() else None
+
+
 def call(contents, tier: str = FAST, config=None,
          timeout_ms: int = DEFAULT_TIMEOUT_MS, key: str = ""):
+    routed = _route(contents, tier, config, timeout_ms) if not key else tier
+    if isinstance(routed, _Reply):
+        return routed
+    if routed is None:
+        return None
+    tier = routed
+    return _gemini_call(contents, tier=tier, config=config, timeout_ms=timeout_ms, key=key)
+
+
+def _gemini_call(contents, tier: str = FAST, config=None,
+                 timeout_ms: int = DEFAULT_TIMEOUT_MS, key: str = ""):
     """Run one generation, walking the ladder until one answers.
 
     Returns the SDK's own response object, so callers that need more than the

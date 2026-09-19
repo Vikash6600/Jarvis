@@ -26,7 +26,7 @@ def _get_api_key() -> str:
         return json.load(f)["gemini_api_key"]
 
 
-def _get_gemini(tier: str = gemini.SMART):
+def _get_gemini(tier: str = "code"):   # routed to the CODE model (core/models.py)
     """Writing and fixing code is the reasoning tier; a 60s deadline because a
     whole file can come back."""
     class _W:

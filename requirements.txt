@@ -90,3 +90,9 @@ pynvml                       # system_monitor + the HUD's GPU meter (NVIDIA)
 # macOS / Linux OS actions (volume, brightness, reminders) shell out to native
 # tools (pactl / brightnessctl / osascript / systemd), so no extra Python
 # packages are needed there — nothing Windows-specific is ever pulled in.
+
+# -- Multi-provider voice pipeline (core/pipeline_session.py) --
+# Free neural text-to-speech and an in-memory MP3 decoder, used when voice runs
+# without Gemini Live (any OpenAI-compatible model + speech-to-text).
+edge-tts>=7,<8
+miniaudio>=1.59,<2

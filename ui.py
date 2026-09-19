@@ -23,7 +23,7 @@ from PyQt6.QtCore import (
     QPropertyAnimation, QRect, QRectF, QSize, Qt, QTimer, QUrl, pyqtSignal,
 )
 from PyQt6.QtGui import (
-    QBrush, QColor, QConicalGradient, QDragEnterEvent, QDropEvent, QFont,
+    QBrush, QColor, QConicalGradient, QDesktopServices, QDragEnterEvent, QDropEvent, QFont,
     QFontDatabase, QKeySequence, QLinearGradient, QPainter, QPainterPath,
     QPen, QPixmap, QRadialGradient, QShortcut,
 )
@@ -1649,6 +1649,311 @@ class SetupOverlay(QWidget):
         self.done.emit(key, self._sel_os)
 
 
+class ModelHubOverlay(QWidget):
+    """AI MODELS & API KEYS — paste keys for the top providers right in the
+    HUD, test them, and choose which model does which job (or leave it AUTO).
+
+    In setup mode it is the first-run screen: any one working provider is
+    enough to start (Gemini is no longer required)."""
+
+    saved = pyqtSignal(bool)                       # True when voice/chat changed
+    closed = pyqtSignal()
+    _test_sig = pyqtSignal(str, bool, str, object)  # preset, ok, message, models
+
+    def __init__(self, parent=None, setup_mode: bool = False):
+        super().__init__(parent)
+        from core import models as M
+        self._M = M
+        self._setup = setup_mode
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setObjectName("ModelHub")
+        self.setStyleSheet(f"""
+            QWidget#ModelHub {{ background: rgba(4, 11, 40, 246);
+                border: 1px solid {C.PRI}; border-radius: 4px; }}
+            QLabel {{ background: transparent; border: none; }}
+            QLineEdit {{ background: #030a2c; color: {C.WHITE}; border: 1px solid {C.BORDER_B};
+                border-bottom: 2px solid {C.PRI_DIM}; padding: 3px 7px; }}
+            QLineEdit:focus {{ border-bottom: 2px solid {C.PRI}; }}
+            QComboBox {{ background: #030a2c; color: {C.WHITE}; border: 1px solid {C.BORDER_B};
+                padding: 3px 7px; }}
+            QComboBox QAbstractItemView {{ background: {C.PANEL}; color: {C.WHITE};
+                selection-background-color: {C.BORDER_B}; }}
+            QScrollArea {{ background: transparent; border: none; }}
+            QScrollBar:vertical {{ background: {C.PANEL}; width: 8px; }}
+            QScrollBar::handle:vertical {{ background: {C.BORDER_B}; min-height: 30px; }}
+        """)
+        self._test_sig.connect(self._on_tested)
+
+        # current providers, keyed by preset id
+        raw = []
+        try:
+            raw = list(json.loads(API_FILE.read_text(encoding="utf-8")).get("providers") or [])
+        except Exception:
+            pass
+        legacy = (_read_full_config().get("gemini_api_key") or "").strip()
+        self._prov: dict[str, dict] = {}
+        for pid in M.PRESET_ORDER:
+            pre = M.PRESETS[pid]
+            found = next((p for p in raw if p.get("preset") == pid or p.get("id") == pid), None)
+            prov = dict(found) if found else {
+                "id": pid, "preset": pid, "label": pre["label"], "kind": pre["kind"],
+                "base_url": pre["base_url"], "api_key": "", "models": list(pre["models"])}
+            if pid == "gemini" and not prov.get("api_key") and legacy:
+                prov["api_key"] = legacy
+            self._prov[pid] = prov
+        self._rows: dict[str, dict] = {}
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(22, 16, 22, 16)
+        root.setSpacing(10)
+
+        top = QHBoxLayout()
+        tcol = QVBoxLayout(); tcol.setSpacing(0)
+        crumb = QLabel("FIRST-TIME SETUP" if setup_mode else "CONTROL DECK › AI MODELS")
+        crumb.setFont(QFont(FONT_MONO, 8)); crumb.setStyleSheet(f"color: {C.ACC2};")
+        tf = QFont(FONT_DISPLAY, 15, QFont.Weight.Black)
+        tf.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 4)
+        title = QLabel("CONNECT YOUR AI MODELS" if setup_mode else "AI MODELS & API KEYS")
+        title.setFont(tf); title.setStyleSheet(f"color: {C.WHITE};")
+        sub = QLabel("Paste a key for any provider — one is enough. Jarvis picks the right model "
+                     "for each job automatically, or pin one yourself on the right.")
+        sub.setFont(QFont(FONT_MONO, 8)); sub.setStyleSheet(f"color: {C.TEXT_MED};")
+        sub.setWordWrap(True)
+        tcol.addWidget(crumb); tcol.addWidget(title); tcol.addWidget(sub)
+        top.addLayout(tcol, 1)
+        if not setup_mode:
+            x = QPushButton("✕")
+            x.setFixedSize(36, 36)
+            x.setCursor(Qt.CursorShape.PointingHandCursor)
+            x.setStyleSheet(f"QPushButton {{ background: transparent; color: {C.TEXT_MED};"
+                            f" border: 1px solid {C.BORDER_B}; }} QPushButton:hover {{ color: {C.PRI}; }}")
+            x.clicked.connect(self._close)
+            top.addWidget(x, 0, Qt.AlignmentFlag.AlignTop)
+        root.addLayout(top)
+
+        body = QHBoxLayout(); body.setSpacing(16)
+
+        # ── left: API keys ────────────────────────────────────────────────────
+        left = QVBoxLayout(); left.setSpacing(6)
+        lh = QLabel("▣ API KEYS")
+        lh.setFont(QFont(FONT_MONO, 9)); lh.setStyleSheet(f"color: {C.PRI};")
+        left.addWidget(lh)
+        scroll = QScrollArea(); scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setMinimumWidth(360)
+        holder = QWidget(); holder.setStyleSheet("background: transparent;")
+        hl = QVBoxLayout(holder); hl.setContentsMargins(0, 0, 6, 0); hl.setSpacing(6)
+        for pid in M.PRESET_ORDER:
+            hl.addWidget(self._build_row(pid))
+        hl.addStretch()
+        scroll.setWidget(holder)
+        left.addWidget(scroll, 1)
+        body.addLayout(left, 10)
+
+        # ── right: routing ────────────────────────────────────────────────────
+        right = QVBoxLayout(); right.setSpacing(7)
+        rh = QLabel("▣ JOB → MODEL")
+        rh.setFont(QFont(FONT_MONO, 9)); rh.setStyleSheet(f"color: {C.PRI};")
+        right.addWidget(rh)
+        self._combos: dict[str, QComboBox] = {}
+        roles = M.roles()
+        for role in ("voice",) + M.ROLES:
+            name, desc = M.ROLE_LABELS[role]
+            row = QHBoxLayout(); row.setSpacing(8)
+            nl = QLabel(f"{name}<br><span style='color:{C.TEXT_DIM}'>{desc}</span>")
+            nl.setFont(QFont(FONT_MONO, 8)); nl.setStyleSheet(f"color: {C.WHITE};")
+            nl.setFixedWidth(130); nl.setWordWrap(True)
+            cb = QComboBox(); cb.setFont(QFont(FONT_MONO, 8)); cb.setFixedHeight(30)
+            cb.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+            cb.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+            cb.setMinimumContentsLength(14)
+            self._combos[role] = cb
+            row.addWidget(nl); row.addWidget(cb, 1)
+            right.addLayout(row)
+        right.addStretch()
+        self._roles_saved = roles
+        body.addLayout(right, 10)
+        root.addLayout(body, 1)
+
+        bottom = QHBoxLayout()
+        self._status = QLabel("")
+        self._status.setFont(QFont(FONT_MONO, 8)); self._status.setStyleSheet(f"color: {C.TEXT_MED};")
+        self._status.setWordWrap(True)
+        bottom.addWidget(self._status, 1)
+        save = QPushButton("▸  INITIALISE SYSTEMS" if setup_mode else "SAVE")
+        save.setFixedHeight(40); save.setMinimumWidth(190)
+        sf = QFont(FONT_DISPLAY, 10, QFont.Weight.Black)
+        sf.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 3)
+        save.setFont(sf)
+        save.setCursor(Qt.CursorShape.PointingHandCursor)
+        save.setStyleSheet(f"QPushButton {{ background: {C.PRI}; color: #030a2c; border: none; }}"
+                           f" QPushButton:hover {{ background: {C.WHITE}; }}")
+        save.clicked.connect(self._save)
+        bottom.addWidget(save)
+        root.addLayout(bottom)
+
+        self._refill_combos()
+
+    # ── rows ──────────────────────────────────────────────────────────────────
+    def _build_row(self, pid: str) -> QWidget:
+        M = self._M
+        pre, prov = M.PRESETS[pid], self._prov[pid]
+        box = QFrame()
+        box.setObjectName("KeyRow")
+        box.setStyleSheet(f"QFrame#KeyRow {{ background: rgba(6, 17, 61, 200); border: 1px solid {C.BORDER};"
+                          f" border-left: 3px solid {C.BORDER_B}; }}")
+        v = QVBoxLayout(box); v.setContentsMargins(10, 6, 10, 6); v.setSpacing(4)
+        h = QHBoxLayout(); h.setSpacing(8)
+        nm = QLabel(pre["label"].upper())
+        nf = QFont(FONT_DISPLAY, 8, QFont.Weight.Bold)
+        nf.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 2)
+        nm.setFont(nf); nm.setStyleSheet(f"color: {C.WHITE};")
+        h.addWidget(nm)
+        st = QLabel("")
+        st.setFont(QFont(FONT_MONO, 7)); st.setStyleSheet(f"color: {C.TEXT_DIM};")
+        h.addWidget(st, 1)
+        if pre.get("url"):
+            get = QPushButton("GET KEY ↗" if not pre.get("local") else "DOWNLOAD ↗")
+            get.setFont(QFont(FONT_MONO, 7)); get.setCursor(Qt.CursorShape.PointingHandCursor)
+            get.setStyleSheet(f"QPushButton {{ background: transparent; color: {C.TEXT_MED}; border: none; }}"
+                              f" QPushButton:hover {{ color: {C.PRI}; }}")
+            get.clicked.connect(lambda _=False, u=pre["url"]: QDesktopServices.openUrl(QUrl(u)))
+            h.addWidget(get)
+        v.addLayout(h)
+        h2 = QHBoxLayout(); h2.setSpacing(6)
+        url = None
+        if pre.get("local") or pid == "custom":
+            url = QLineEdit(prov.get("base_url") or pre["base_url"])
+            url.setPlaceholderText("https://host/v1")
+            url.setFont(QFont(FONT_MONO, 8)); url.setFixedHeight(28)
+            h2.addWidget(url, 3)
+        key = QLineEdit(prov.get("api_key", ""))
+        key.setEchoMode(QLineEdit.EchoMode.Password)
+        key.setPlaceholderText(pre["hint"])
+        key.setFont(QFont(FONT_MONO, 8)); key.setFixedHeight(28)
+        if pre.get("local"):
+            key.hide()
+        h2.addWidget(key, 4)
+        test = QPushButton("TEST")
+        test.setFixedSize(58, 28)
+        test.setFont(QFont(FONT_MONO, 8, QFont.Weight.Bold))
+        test.setCursor(Qt.CursorShape.PointingHandCursor)
+        test.setStyleSheet(f"QPushButton {{ background: transparent; color: {C.PRI}; border: 1px solid {C.PRI_DIM}; }}"
+                           f" QPushButton:hover {{ background: {C.PRI_GHO}; border-color: {C.PRI}; }}")
+        test.clicked.connect(lambda _=False, p=pid: self._test(p))
+        h2.addWidget(test)
+        v.addLayout(h2)
+        self._rows[pid] = {"box": box, "key": key, "url": url, "status": st}
+        n = len(prov.get("models") or [])
+        if prov.get("api_key") or (pre.get("local") and prov.get("tested")):
+            self._set_status(pid, True, f"saved · {n} models")
+        return box
+
+    def _set_status(self, pid: str, ok: bool | None, msg: str) -> None:
+        r = self._rows.get(pid)
+        if not r:
+            return
+        col = C.GREEN if ok else (C.RED if ok is False else C.ACC2)
+        r["status"].setText(("● " if ok is not None else "◌ ") + msg)
+        r["status"].setStyleSheet(f"color: {col};")
+        r["box"].setStyleSheet(f"QFrame#KeyRow {{ background: rgba(6, 17, 61, 200); border: 1px solid {C.BORDER};"
+                               f" border-left: 3px solid {col if ok else C.BORDER_B}; }}")
+
+    def _collect(self, pid: str) -> dict:
+        prov = dict(self._prov[pid])
+        r = self._rows[pid]
+        prov["api_key"] = r["key"].text().strip()
+        if r["url"] is not None:
+            prov["base_url"] = r["url"].text().strip().rstrip("/")
+        return prov
+
+    def _test(self, pid: str) -> None:
+        prov = self._collect(pid)
+        if prov["kind"] != "gemini" and not prov.get("base_url"):
+            self._set_status(pid, False, "enter a base URL")
+            return
+        if not prov.get("api_key") and not self._M.PRESETS[pid].get("local") and pid != "custom":
+            self._set_status(pid, False, "paste a key first")
+            return
+        self._set_status(pid, None, "testing…")
+
+        def work():
+            try:
+                names = self._M.fetch_models(prov)
+                self._test_sig.emit(pid, True, f"key OK · {len(names)} models", names)
+            except Exception as e:
+                self._test_sig.emit(pid, False, str(e)[:90], None)
+        threading.Thread(target=work, daemon=True).start()
+
+    def _on_tested(self, pid: str, ok: bool, msg: str, names) -> None:
+        self._set_status(pid, ok, msg)
+        if ok and names is not None:
+            prov = self._collect(pid)
+            prov["models"] = list(names) or list(self._M.PRESETS[pid]["models"])
+            prov["tested"] = True
+            self._prov[pid] = prov
+            self._refill_combos()
+
+    # ── routing combos ────────────────────────────────────────────────────────
+    def _refill_combos(self) -> None:
+        M = self._M
+        active = []
+        for pid in M.PRESET_ORDER:
+            prov = self._collect(pid) if pid in self._rows else self._prov[pid]
+            if prov.get("api_key") or prov.get("tested"):
+                active.append(prov)
+        for role, cb in self._combos.items():
+            cur = cb.currentData() or self._roles_saved.get(role, "auto")
+            cb.blockSignals(True)
+            cb.clear()
+            if role == "voice":
+                cb.addItem("AUTO  (Gemini Live if a Gemini key is set)", "auto")
+                cb.addItem("SPEECH PIPELINE  (any model + speech-to-text)", "pipeline")
+            else:
+                cb.addItem("AUTO  (best match by model tags)", "auto")
+                for prov in active:
+                    for m in prov.get("models") or []:
+                        tags = M.guess_tags(prov["preset"], m)
+                        if role == "stt" and "stt" not in tags:
+                            continue
+                        if role != "stt" and ("stt" in tags or "other" in tags):
+                            continue
+                        if role == "search" and prov["kind"] != "gemini":
+                            continue
+                        cb.addItem(f"{prov['preset']} / {m}", f"{prov['id']}/{m}")
+            i = cb.findData(cur)
+            cb.setCurrentIndex(i if i >= 0 else 0)
+            cb.blockSignals(False)
+
+    # ── save / close ──────────────────────────────────────────────────────────
+    def _save(self) -> None:
+        M = self._M
+        provs = []
+        for pid in M.PRESET_ORDER:
+            prov = self._collect(pid)
+            local = M.PRESETS[pid].get("local")
+            if prov.get("api_key") or (local and prov.get("tested")) or \
+                    (pid == "custom" and prov.get("base_url") and prov.get("tested")):
+                prov.setdefault("models", list(M.PRESETS[pid]["models"]))
+                provs.append(prov)
+        if not provs:
+            self._status.setText("Add at least one API key (or test a local server) to continue.")
+            self._status.setStyleSheet(f"color: {C.RED};")
+            return
+        role_map = {r: (cb.currentData() or "auto") for r, cb in self._combos.items()}
+        before = (M.voice_engine(), M.roles().get("chat"))
+        M.save(provs, role_map)
+        after = (M.voice_engine(), M.roles().get("chat"))
+        self._status.setText(f"Saved · {len(provs)} provider(s) · voice: "
+                             f"{'Gemini Live' if M.voice_engine() == 'gemini_live' else 'speech pipeline'}")
+        self._status.setStyleSheet(f"color: {C.GREEN};")
+        self.saved.emit(before != after)
+
+    def _close(self) -> None:
+        self.hide()
+        self.closed.emit()
+
+
 class HueWheel(QWidget):
     """
     Circular colour picker. The user drags the handle (small white circle)
@@ -3101,13 +3406,12 @@ class MainWindow(QMainWindow):
 
         self.setWindowTitle(f"{_display} — {APP_VERSION}")
         self.setMinimumSize(_MIN_W, _MIN_H)
-        self.resize(_DEFAULT_W, _DEFAULT_H)
-
         screen = QApplication.primaryScreen().availableGeometry()
-        self.move(
-            (screen.width()  - _DEFAULT_W) // 2,
-            (screen.height() - _DEFAULT_H) // 2,
-        )
+        _w = max(_DEFAULT_W, min(1440, int(screen.width() * 0.9)))
+        _h = max(_DEFAULT_H, min(900, int(screen.height() * 0.9)))
+        self.resize(_w, _h)
+        self.move(screen.x() + (screen.width() - _w) // 2,
+                  screen.y() + (screen.height() - _h) // 2)
 
         self.on_text_command   = None
         self.on_remote_clicked = None   # callable: () -> (url, key) | None
@@ -3255,6 +3559,7 @@ class MainWindow(QMainWindow):
 
         self._overlay: SetupOverlay | None = None
         self._ready = self._check_config()
+        self._update_engine_label()
         if not self._ready:
             self._show_setup()
 
@@ -3695,12 +4000,10 @@ class MainWindow(QMainWindow):
         super().resizeEvent(event)
         cw = self.centralWidget()
         if self._overlay and self._overlay.isVisible():
-            ow, oh = 460, 390
-            self._overlay.setGeometry(
-                (cw.width()  - ow) // 2,
-                (cw.height() - oh) // 2,
-                ow, oh,
-            )
+            self._place_hub(self._overlay)
+        _hub = getattr(self, "_hub", None)
+        if _hub is not None and _hub.isVisible():
+            self._place_hub(_hub)
         if self._remote_overlay and self._remote_overlay.isVisible():
             ow, oh = RemoteKeyOverlay._OW, RemoteKeyOverlay._OH
             self._remote_overlay.setGeometry(
@@ -4038,6 +4341,14 @@ class MainWindow(QMainWindow):
         hdr.setStyleSheet(f"color: {C.PRI_DIM}; background: transparent; "
                           f"border-bottom: 1px solid {C.BORDER}; padding-bottom: 4px;")
         lay.addWidget(hdr)
+
+        models_btn = QPushButton("🤖  AI MODELS & API KEYS")
+        models_btn.setFixedHeight(30)
+        models_btn.setFont(QFont(FONT_MONO, 8, QFont.Weight.Bold))
+        models_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        models_btn.setStyleSheet(_BTN_STYLE_PRI)
+        models_btn.clicked.connect(self._open_model_hub)
+        lay.addWidget(models_btn)
 
         remote_btn = QPushButton("◉  REMOTE CONTROL")
         remote_btn.setFixedHeight(30)
@@ -5326,36 +5637,82 @@ class MainWindow(QMainWindow):
         self.hud.speaking = (state == "SPEAKING")
 
     def _check_config(self) -> bool:
-        if not API_FILE.exists(): return False
+        if not API_FILE.exists():
+            return False
         try:
+            from core import models as _M
             d = json.loads(API_FILE.read_text(encoding="utf-8"))
-            return bool(d.get("gemini_api_key")) and bool(d.get("os_system"))
+            return _M.has_any() and bool(d.get("os_system"))
         except Exception:
             return False
 
-    def _show_setup(self):
-        ov = SetupOverlay(self.centralWidget())
+    def _place_hub(self, ov: QWidget) -> None:
         cw = self.centralWidget()
-        ow, oh = 460, 390
-        ov.setGeometry(
-            (cw.width()  - ow) // 2,
-            (cw.height() - oh) // 2,
-            ow, oh,
-        )
-        ov.done.connect(self._on_setup_done)
-        ov.show()
-        self._overlay = ov
+        ow = min(1000, cw.width() - 40)
+        oh = min(660, cw.height() - 40)
+        ov.setGeometry((cw.width() - ow) // 2, (cw.height() - oh) // 2, ow, oh)
 
-    def _on_setup_done(self, key: str, os_name: str):
+    def _show_setup(self):
+        ov = ModelHubOverlay(self.centralWidget(), setup_mode=True)
+        self._place_hub(ov)
+        ov.saved.connect(lambda _changed: self._on_setup_done())
+        ov.show(); ov.raise_()
+        self._overlay = ov
+        # The window may not be laid out yet (first boot) — re-fit once it is.
+        for _ms in (0, 150, 600):
+            QTimer.singleShot(_ms, lambda o=ov: o.isVisible() and self._place_hub(o))
+
+    def _open_model_hub(self):
+        try:
+            self._drawer_btn.setChecked(False)
+            self._quick_drawer.hide()
+        except Exception:
+            pass
+        old = getattr(self, "_hub", None)
+        if old is not None:
+            old.deleteLater()
+        ov = ModelHubOverlay(self.centralWidget(), setup_mode=False)
+        self._place_hub(ov)
+        ov.saved.connect(self._on_models_saved)
+        ov.show(); ov.raise_()
+        self._hub = ov
+
+    def _on_models_saved(self, voice_changed: bool):
+        from core import models as _M
+        self._log.append_log(
+            "SYS: AI models saved. Voice → "
+            + ("Gemini Live" if _M.voice_engine() == "gemini_live" else "speech pipeline")
+            + f" · code → {_M.describe('code')} · smart → {_M.describe('smart')}")
+        self._update_engine_label()
+        if voice_changed and self.on_voice_change:
+            try:
+                self.on_voice_change()
+            except Exception:
+                pass
+
+    def _update_engine_label(self):
+        try:
+            from core import models as _M
+            if _M.voice_engine() == "gemini_live":
+                self.hud.engine_label = "VOICE · GEMINI LIVE"
+            else:
+                self.hud.engine_label = "VOICE · " + _M.describe("chat").upper()
+        except Exception:
+            pass
+
+    def _on_setup_done(self, *_):
         os.makedirs(CONFIG_DIR, exist_ok=True)
-        API_FILE.write_text(
-            json.dumps({"gemini_api_key": key, "os_system": os_name}, indent=4),
-            encoding="utf-8",
-        )
+        cfg = _read_full_config()
+        os_name = cfg.get("os_system") or {"darwin": "mac", "windows": "windows"}.get(_OS.lower(), "linux")
+        cfg["os_system"] = os_name
+        API_FILE.write_text(json.dumps(cfg, indent=4), encoding="utf-8")
+        if not self._check_config():
+            return
         self._ready = True
         if self._overlay:
             self._overlay.hide()
             self._overlay = None
+        self._update_engine_label()
         self._apply_state("LISTENING")
         self._assistant_name = _read_full_config().get("assistant_name", "JARVIS") or "JARVIS"
         self._log.append_log(f"SYS: Initialised. OS={os_name.upper()}. {self._assistant_name} online.")

@@ -282,6 +282,13 @@ def _render_prompt(template: str, values: dict) -> str:
     return out
 
 
+def _read_cfg_value(key: str, default=None):
+    try:
+        return json.loads((BASE_DIR / "config" / "api_keys.json").read_text(encoding="utf-8")).get(key, default)
+    except Exception:
+        return default
+
+
 def _get_api_key() -> str:
     with open(API_CONFIG_PATH, "r", encoding="utf-8") as f:
         return json.load(f)["gemini_api_key"]
@@ -1016,6 +1023,10 @@ class JarvisLive:
         if mem_str:
             parts.append(mem_str)
         parts.append(sys_prompt)
+        # Kept for the speech-pipeline engine (core/pipeline_session.py), which
+        # takes the same prompt and tools as the Live session.
+        self._pipe_system = "\n".join(parts)
+        self._pipe_decls = _all_decls
 
         cfg = dict(
             response_modalities=["AUDIO"],
@@ -2085,16 +2096,31 @@ class JarvisLive:
                 _resumed_with = self._resume_handle is not None
                 config = self._build_config()
 
-                # Fresh client on every reconnect — avoids stale HTTP session state
-                # v1alpha carries proactive audio; if it gets rejected we fall
-                # back to v1beta.
-                client = genai.Client(
-                    api_key=_get_api_key(),
-                    http_options={"api_version": "v1alpha" if self._enhanced_live else "v1beta"}
-                )
+                # Voice engine: Gemini Live when a Gemini key is set (fastest,
+                # native audio), otherwise the speech pipeline — STT → any
+                # configured chat model with tools → neural TTS.
+                from core import models as _models
+                self._engine = _models.voice_engine()
+                if self._engine == "pipeline":
+                    from core.pipeline_session import PipelineSession
+                    _chat = _models.describe("chat")
+                    print(f"[JARVIS] Voice engine: speech pipeline (chat → {_chat}, "
+                          f"stt → {_models.describe('stt')})")
+                    self.ui.write_log(f"SYS: Voice via speech pipeline · brain → {_chat}")
+                    connect_cm = PipelineSession(self._pipe_system, self._pipe_decls,
+                                                 voice=_read_cfg_value("pipeline_voice"), log=print)
+                else:
+                    # Fresh client on every reconnect — avoids stale HTTP session state
+                    # v1alpha carries proactive audio; if it gets rejected we fall
+                    # back to v1beta.
+                    client = genai.Client(
+                        api_key=_get_api_key(),
+                        http_options={"api_version": "v1alpha" if self._enhanced_live else "v1beta"}
+                    )
+                    connect_cm = client.aio.live.connect(model=LIVE_MODEL, config=config)
 
                 async with (
-                    client.aio.live.connect(model=LIVE_MODEL, config=config) as session,
+                    connect_cm as session,
                     asyncio.TaskGroup() as tg,
                 ):
                     self.session          = session
@@ -2226,7 +2252,8 @@ class JarvisLive:
                     continue
 
                 # Invalid API key — stop hammering the API, prompt re-configuration
-                if "API key not valid" in err_str or "1007" in err_str:
+                if getattr(self, "_engine", "gemini_live") == "gemini_live" and (
+                        "API key not valid" in err_str or "1007" in err_str):
                     self.ui.write_log("ERR: API key invalid — please re-enter your key.")
                     self.ui.set_state("SLEEPING")
                     self.ui.prompt_reconfig()

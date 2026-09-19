@@ -302,6 +302,14 @@ def _screen_glance() -> str:
                        tier=gemini.FAST, timeout_ms=30_000, default="OK")
 
 
+def _restricted() -> bool:
+    try:
+        from core import access
+        return access.is_restricted()
+    except Exception:
+        return False
+
+
 def _mission_user_name() -> str:
     try:
         from memory.config_manager import get_user_name
@@ -371,7 +379,10 @@ TOOL_DECLARATIONS = [
             "schedule is given ('every 30 min', 'daily 08:00', 'weekdays 18:30'). Reply briefly that you are on it."
         ),
         "parameters": {"type": "OBJECT", "properties": {
-            "goal": {"type": "STRING", "description": "The full request in the user's words, with every detail they gave."},
+            "goal": {"type": "STRING", "description": "A SELF-CONTAINED goal: restate everything the user wants from "
+                     "the whole conversation (what to build, references like games/apps/styles, features, audience, "
+                     "constraints) — never 'that site' or 'it'."},
+            "project_path": {"type": "STRING", "description": "Only when changing an EXISTING project: its folder path."},
             "kind": {"type": "STRING", "description": "website | code | research | general"},
             "schedule": {"type": "STRING", "description": "Only for recurring routines, e.g. 'every 2 hours', 'daily 8:00'."},
         }, "required": ["goal"]},
@@ -950,7 +961,11 @@ class JarvisLive:
         st = mc.store
         if name == "start_mission":
             kind = str(args.get("kind") or "general").lower()
-            m = mc.create(str(args.get("goal", "")), kind=kind, schedule=str(args.get("schedule") or ""))
+            proj = str(args.get("project_path") or "").strip().strip('"')
+            if proj and not Path(proj).expanduser().is_dir():
+                return f"I couldn't find the project folder {proj}. Ask the user for the exact path."
+            m = mc.create(str(args.get("goal", "")), kind=kind, schedule=str(args.get("schedule") or ""),
+                          workspace=proj)
             if m.schedule:
                 return f"Routine #{m.id} scheduled ({m.schedule}). Confirm briefly."
             return (f"Mission #{m.id} started in the background: researching, then a plan will appear on the "
@@ -1524,6 +1539,10 @@ class JarvisLive:
 
             elif name in MISSION_TOOLS:
                 result = await loop.run_in_executor(None, lambda: self._mission_tool(name, args))
+
+            elif name == "dev_agent" and _restricted():
+                result = ("Restricted access mode: generating and running new projects is disabled. I can still "
+                          "edit existing code. The user can switch to Full access in the ⚙ control deck.")
 
             elif self._action_registry.has(name):
                 # file_processor: fall back to the currently-uploaded file when none is given

@@ -119,6 +119,15 @@ def run_guarded(key: str, title: str, text: str, run: Callable[[], str]) -> str:
     """Screen `text` (the code / command about to run) and then:
     block it, park it behind the HUD confirmation, or run it now."""
     a = assess(text)
+    from core import access
+    if access.is_restricted():
+        why = ("writes to git" if access.GIT_WRITE.search(text or "") else
+               a.summary() if a.level >= APPROVAL_LEVEL else "")
+        if why:
+            _audit(f"RESTRICTED-BLOCK ({a.level}/7) {title}: {why}")
+            return (f"[RESTRICTED_MODE] Refused: this {why}, which is not allowed in Restricted access mode. "
+                    f"Do the task without it (code edits are fine), or tell the user it needs Full access "
+                    f"(switched only from the ⚙ control deck).")
     if a.blocked:
         _audit(f"BLOCKED ({a.level}/7) {title}: {a.summary()} :: {a.matches[:3]}")
         return (f"[SECURITY_BLOCKED] I refused to run this because it {a.summary()}. "

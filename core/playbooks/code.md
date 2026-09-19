@@ -11,3 +11,10 @@
 - Install dependencies and run with run_command (Python: `python -m pip install …`, `python main.py`).
 - Write at least a smoke test and run it. Read errors, fix, re-run — iterate until it works.
 - Finish with README.md (setup, usage) and REPORT.md, then `finish` with a short summary.
+
+## Changing an existing project
+- Start by mapping it: list_dir, read the README, entry points, config and every file the change touches or
+  that calls into it. Note the conventions (naming, folder layout, error handling, test style).
+- Plan the smallest change that fits those conventions; say which files change and why.
+- Make surgical edits with edit_file; keep formatting and structure; add files only where similar files live.
+- Run the project's existing tests/linters if present. Never commit — the user reviews the diff.

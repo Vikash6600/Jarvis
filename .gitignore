@@ -66,3 +66,4 @@ config/clap_launcher.log
 # Missions state (your tasks, plans and history)
 memory/missions.json
 memory/missions.tmp
+memory/telegram_chat.json

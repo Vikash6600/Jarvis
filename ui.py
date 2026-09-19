@@ -2054,7 +2054,7 @@ _STATUS_COL = {
     "awaiting_plan_approval": "#ffb02e", "waiting_approval": "#ffb02e", "waiting_user": "#ffb02e",
     "scheduled": "#b58cff", "paused": "#6f8fd8", "done": "#2bff9a", "failed": "#ff3b4e", "cancelled": "#6f8fd8",
 }
-_STATUS_TXT = {"awaiting_plan_approval": "PLAN READY", "waiting_approval": "NEEDS OK",
+_STATUS_TXT = {"awaiting_plan_approval": "REVIEW", "waiting_approval": "NEEDS OK",
                "waiting_user": "QUESTION", "executing": "BUILDING"}
 
 
@@ -2155,7 +2155,12 @@ class MissionBriefOverlay(QWidget):
         v.addLayout(top)
 
         body = QTextEdit(); body.setReadOnly(True); body.setFont(QFont(FONT_BODY, 11))
-        md = mission.plan or "_The plan is being prepared…_"
+        flow_stage = mission.stage == "flow"
+        md = (mission.flow if flow_stage else mission.plan) or "_The plan is being prepared…_"
+        if flow_stage:
+            md = ("## How I understand it — let's agree this before the detailed plan\n"
+                  "_Answer the questions or tell me what to change below; APPROVE when the flow is right._\n\n"
+                  + md)
         if mission.status == "done" and mission.result:
             md = f"## Result\n{mission.result}\n\n---\n" + md
         if mission.pending_question:
@@ -2166,7 +2171,9 @@ class MissionBriefOverlay(QWidget):
 
         self._fb = QLineEdit()
         self._fb.setFont(QFont(FONT_MONO, 9))
-        self._fb.setPlaceholderText("Changes you want (e.g. 'darker theme, add online ordering')"
+        self._fb.setPlaceholderText(("Answers to the questions, or what to change in the flow / stack…"
+                                     if mission.stage == "flow" else
+                                     "Changes you want (e.g. 'darker theme, add online ordering')")
                                     if mission.status == "awaiting_plan_approval" else
                                     "Your answer…" if mission.status == "waiting_user" else "")
         self._fb.setVisible(mission.status in ("awaiting_plan_approval", "waiting_user"))
@@ -2188,8 +2195,9 @@ class MissionBriefOverlay(QWidget):
             b.clicked.connect(fn); row.addWidget(b)
         if mission.status == "awaiting_plan_approval":
             btn("CANCEL", False, lambda: self._do(lambda: control.cancel(self._m)))
-            btn("REVISE", False, self._revise)
-            btn("APPROVE ▸", True, lambda: self._do(lambda: control.approve(self._m)))
+            btn("DISCUSS / CHANGE" if mission.stage == "flow" else "REVISE", False, self._revise)
+            btn("AGREE FLOW ▸" if mission.stage == "flow" else "APPROVE ▸", True,
+                lambda: self._do(lambda: control.approve(self._m)))
         elif mission.status == "waiting_user":
             btn("SEND ANSWER ▸", True, lambda: self._do(lambda: control.answer(self._m, self._fb.text())))
         elif mission.status in ("paused", "failed"):
@@ -4754,6 +4762,14 @@ class MainWindow(QMainWindow):
         lay.addWidget(self._clap_sens_btn)
         self._refresh_clap_btns()
 
+        self._access_btn = QPushButton()
+        self._access_btn.setFixedHeight(28)
+        self._access_btn.setFont(QFont(FONT_MONO, 7, QFont.Weight.Bold))
+        self._access_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._access_btn.clicked.connect(self._toggle_access)
+        lay.addWidget(self._access_btn)
+        self._refresh_access_btn()
+
         self._watch_btn = QPushButton()
         self._watch_btn.setFixedHeight(26)
         self._watch_btn.setFont(QFont(FONT_MONO, 7))
@@ -5651,6 +5667,30 @@ class MainWindow(QMainWindow):
             save_clap_sensitivity(nxt)
         self._refresh_clap_btns()
 
+    def _refresh_access_btn(self):
+        from core import access
+        r = access.is_restricted()
+        col = C.ACC2 if r else C.GREEN
+        self._access_btn.setText("🔒  ACCESS: RESTRICTED" if r else "🔓  ACCESS: FULL")
+        self._access_btn.setToolTip(
+            "RESTRICTED: Jarvis may read and edit code only — no git commits/pushes, no deletes, installs, "
+            "process kills or system changes; it must read the project before editing and keep changes small.\n"
+            "FULL: everything, with risky steps confirmed on the HUD.\nOnly changeable here, never by voice.")
+        self._access_btn.setStyleSheet(f"""
+            QPushButton {{ background: {C.PANEL2}; color: {col}; border: 1px solid {col};
+                border-radius: 3px; text-align: left; padding: 0 8px; }}
+            QPushButton:hover {{ color: {C.WHITE}; }}""")
+
+    def _toggle_access(self):
+        from core import access
+        m = access.set_mode("full" if access.is_restricted() else "restricted")
+        self._refresh_access_btn()
+        self._refresh_models_panel()
+        self._log.append_log(
+            "SYS: Restricted mode — I'll only read and edit code: no commits, deletes, installs or system changes, "
+            "and I'll study the project before every change." if m == "restricted"
+            else "SYS: Full access mode — all tools enabled; risky steps still ask you on the HUD.")
+
     def _refresh_watch_btn(self):
         from memory.config_manager import get_screen_watch
         on = get_screen_watch()
@@ -6165,7 +6205,12 @@ class MainWindow(QMainWindow):
             return
         try:
             from core import models as _M
-            rows = [("VOICE", "Gemini Live" if _M.voice_engine() == "gemini_live" else "pipeline", C.PRI)]
+            from core import access as _A
+            rows = [("ACCESS", "RESTRICTED" if _A.is_restricted() else "FULL",
+                     C.ACC2 if _A.is_restricted() else C.GREEN),
+                    ("VOICE", "Gemini Live" if _M.voice_engine() == "gemini_live" else "pipeline", C.PRI)]
+            ag = _M.describe("agent")
+            rows.append(("AGENT", ag.split(" / ", 1)[-1] if ag != "none" else "—", C.ACC2))
             for role, col in (("chat", C.GREEN), ("smart", C.GREEN), ("code", C.ACC2),
                               ("vision", "#b58cff"), ("stt", C.TEXT_MED)):
                 d = _M.describe(role)

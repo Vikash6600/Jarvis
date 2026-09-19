@@ -371,6 +371,8 @@ def chat(p: dict, model: str, messages: list, timeout: float = 60.0, **extra) ->
     r = requests.post(url, headers=_headers(p), json=body, timeout=timeout)
     if r.status_code == 429:
         cool(p, model)
+    elif r.status_code == 404 or "no longer available" in r.text[:400].lower():
+        cool(p, model, 24 * 3600)
     if r.status_code != 200:
         raise RuntimeError(_err(r))
     return r.json()

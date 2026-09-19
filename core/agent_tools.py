@@ -52,6 +52,11 @@ CONTROL_TOOLS = [
         "important updates are spoken).", {"message": S, "important": {"type": "boolean"}}, ["message"]),
     _fn("ask_user", "Pause and ask the user a question you cannot resolve yourself. Use sparingly.",
         {"question": S}, ["question"]),
+    _fn("propose_flow", "DISCOVERY stage: submit your understanding of how the product will work — core idea, "
+        "user journey step by step, screens/pages, features, data it stores, key mechanics, 2-3 technology "
+        "stack options with a recommendation, and your open questions. The user reviews and discusses it "
+        "before the detailed plan is written.",
+        {"flow_markdown": S, "questions": {"type": "array", "items": S}}, ["flow_markdown"]),
     _fn("submit_plan", "Planning phase only: submit the complete plan (markdown) and the ordered build "
         "steps. The mission then waits for the user's approval.",
         {"plan_markdown": S, "steps": {"type": "array", "items": S}}, ["plan_markdown", "steps"]),
@@ -69,6 +74,22 @@ class Workspace:
         self._log = log
         self._server = None
         self._port = None
+        self._read: set[str] = set()      # files read this run (restricted mode: read before edit)
+        self._listed = False
+
+    def _key(self, p: Path) -> str:
+        return p.relative_to(self.root).as_posix().lower()
+
+    def _restricted_guard(self, p: Path, editing_existing: bool) -> str:
+        from core import access
+        if not access.is_restricted():
+            return ""
+        if not self._listed:
+            return ("[RESTRICTED_MODE] First call list_dir('.') and read the relevant files to understand the "
+                    "project structure, then make the change.")
+        if editing_existing and self._key(p) not in self._read:
+            return f"[RESTRICTED_MODE] Read {self._key(p)} with read_file before changing it."
+        return ""
 
     def _p(self, rel: str) -> Path:
         p = (self.root / (rel or ".")).resolve()
@@ -81,6 +102,8 @@ class Workspace:
         p = self._p(path)
         if not p.exists():
             return f"(no such folder: {path})"
+        if p == self.root:
+            self._listed = True
         rows = []
         for f in sorted(p.rglob("*")):
             if any(part.startswith(".") for part in f.relative_to(self.root).parts):
@@ -96,11 +119,19 @@ class Workspace:
         p = self._p(path)
         if not p.is_file():
             return f"(no such file: {path})"
+        self._read.add(self._key(p))
         t = p.read_text(encoding="utf-8", errors="replace")
         return t if len(t) <= MAX_READ else t[:MAX_READ] + f"\n… [truncated, {len(t)} chars]"
 
     def write_file(self, path: str, content: str) -> str:
         p = self._p(path)
+        from core import access
+        if access.is_restricted() and p.exists():
+            return ("[RESTRICTED_MODE] Don't rewrite existing files — change them with edit_file "
+                    "(exact snippet → replacement) so the change stays small and reviewable.")
+        g = self._restricted_guard(p, editing_existing=False)
+        if g:
+            return g
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(content, encoding="utf-8")
         return f"wrote {p.relative_to(self.root).as_posix()} ({len(content)} chars)"
@@ -109,6 +140,9 @@ class Workspace:
         p = self._p(path)
         if not p.is_file():
             return f"(no such file: {path})"
+        g = self._restricted_guard(p, editing_existing=True)
+        if g:
+            return g
         t = p.read_text(encoding="utf-8", errors="replace")
         n = t.count(find)
         if n != 1:

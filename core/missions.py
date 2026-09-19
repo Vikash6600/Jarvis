@@ -56,6 +56,10 @@ class Mission:
     phase_note: str = ""
     plan: str = ""
     plan_feedback: list = field(default_factory=list)
+    stage: str = ""                                     # "flow" while the discovery flow is under review
+    flow: str = ""                                      # discovery: how the product works, stack options
+    flow_approved: bool = False
+    project: bool = False                               # workspace is an existing project folder
     steps: list = field(default_factory=list)          # [{"title", "status"}]
     log: list = field(default_factory=list)            # [{"t", "msg"}]
     artifacts: list = field(default_factory=list)
@@ -121,7 +125,8 @@ class MissionStore:
                 pass
 
     # ── api ──────────────────────────────────────────────────────────────────
-    def create(self, goal: str, kind: str = "general", title: str = "", schedule: str = "") -> Mission:
+    def create(self, goal: str, kind: str = "general", title: str = "", schedule: str = "",
+               workspace: str = "") -> Mission:
         with self._lock:
             mid = uuid.uuid4().hex[:4]
             while mid in self._m:
@@ -130,10 +135,14 @@ class MissionStore:
             title = title[:60] + ("…" if len(title) > 60 else "")
             if schedule:
                 kind = "routine"
-            ws = WORK_ROOT / f"{_slug(title)}-{mid}"
-            ws.mkdir(parents=True, exist_ok=True)
+            existing = Path(workspace).expanduser() if workspace else None
+            if existing is not None and existing.is_dir():
+                ws = existing.resolve()
+            else:
+                ws = WORK_ROOT / f"{_slug(title)}-{mid}"
+                ws.mkdir(parents=True, exist_ok=True)
             m = Mission(id=mid, title=title, goal=goal.strip(), kind=kind if kind in KINDS else "general",
-                        workspace=str(ws), schedule=schedule.strip())
+                        workspace=str(ws), schedule=schedule.strip(), project=existing is not None and existing.is_dir())
             if m.schedule:
                 m.next_run = next_run(m.schedule) or _now()
             self._m[mid] = m

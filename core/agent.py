@@ -44,6 +44,14 @@ MAX_TOOL_OUT = 7000
 _SKIP_REGISTRY = {"dev_agent"}   # the agent does this itself, in the workspace
 
 
+FLOW_KINDS = ("website", "code", "research")
+
+
+def needs_flow(m: Mission) -> bool:
+    """Builds get a discovery stage first: agree the flow, then plan the build."""
+    return m.kind in FLOW_KINDS and not m.flow_approved
+
+
 def _playbook(kind: str) -> str:
     try:
         return (PLAYBOOKS / f"{kind}.md").read_text(encoding="utf-8")
@@ -119,8 +127,9 @@ class MissionControl:
             return {k for k, t in self._running.items() if t.is_alive()}
 
     # ── public actions (called from voice tools / UI / Telegram) ─────────────
-    def create(self, goal: str, kind: str = "general", schedule: str = "", title: str = "") -> Mission:
-        m = self.store.create(goal, kind=kind, title=title, schedule=schedule)
+    def create(self, goal: str, kind: str = "general", schedule: str = "", title: str = "",
+               workspace: str = "") -> Mission:
+        m = self.store.create(goal, kind=kind, title=title, schedule=schedule, workspace=workspace)
         if m.schedule:
             nr = next_run(m.schedule)
             first = time.time() if "every" in m.schedule.lower() or "hourly" in m.schedule.lower() else nr
@@ -136,15 +145,21 @@ class MissionControl:
             return f"Mission #{m.id} is {m.status}, not waiting for plan approval."
         if changes.strip():
             return self.revise(m, changes)
+        if m.stage == "flow":
+            self.store.update(m, flow_approved=True, stage="", status="planning", history=[],
+                              phase_note="writing the detailed plan")
+            self._say(m, "Flow agreed — now writing the detailed build plan.", True)
+            return f"Flow for #{m.id} approved; writing the detailed plan next."
         self.store.update(m, status="executing", history=[], phase_note="building")
         self._say(m, "Plan approved — building now.", True)
         return f"Plan for #{m.id} approved; building in the background."
 
     def revise(self, m: Mission, feedback: str) -> str:
         m.plan_feedback.append(feedback.strip())
-        self.store.update(m, status="planning", history=[], phase_note="revising the plan")
-        self._say(m, f"Revising the plan: {feedback.strip()}")
-        return f"Revising the plan for #{m.id}."
+        what = "flow" if m.stage == "flow" else "plan"
+        self.store.update(m, status="planning", stage="", history=[], phase_note=f"revising the {what}")
+        self._say(m, f"Revising the {what}: {feedback.strip()}")
+        return f"Revising the {what} for #{m.id}."
 
     def answer(self, m: Mission, text: str) -> str:
         if m.status != "waiting_user":
@@ -201,10 +216,42 @@ class MissionControl:
             f"MISSION #{m.id}: {m.goal}",
             _playbook("routine" if phase == "routine" else m.kind),
         ]
-        if phase == "planning":
-            parts.append("PHASE: PLANNING. Research first (web_search, fetch_url), save notes, then call "
-                         "submit_plan with the complete markdown plan and the ordered build steps. Do NOT "
-                         "build anything yet — the user approves the plan first.")
+        from core import access
+        parts.append(access.RESTRICTED_RULES if access.is_restricted() else
+                     "ACCESS MODE: FULL. Risky commands still ask the user on the HUD; destructive ones are refused.")
+        if m.project:
+            parts.append("This mission works INSIDE AN EXISTING PROJECT (the workspace). Before planning or "
+                         "changing anything, list the project and read the files that matter so you follow its "
+                         "existing structure, conventions and patterns. Change as little as needed, clearly.")
+        if m.answer:
+            parts.append(f"The user's latest answer to your question: {m.answer}")
+        if phase == "planning" and needs_flow(m):
+            parts.append(
+                "PHASE: DISCOVERY (before any plan). Understand the idea deeply first:\n"
+                "1. Research what the user refers to (e.g. a game, app or style they name — what it is, its "
+                "signature mechanics and look), and 3-5 comparable products (web_search, fetch_url). Save notes.\n"
+                "2. Work out HOW THE PRODUCT WORKS: the core idea and loop, the user journey step by step from "
+                "first visit to daily use, every screen/page and what is on it, features (must-have vs later), "
+                "data it stores and where, key mechanics/rules with numbers (e.g. XP, levels, ranks, streaks), "
+                "and edge cases.\n"
+                "3. Give 2-3 technology stack options (e.g. static HTML/JS + localStorage; React/Vite; Next.js + "
+                "Supabase/Firebase) with pros/cons, cost, hosting, and a recommendation for THIS user.\n"
+                "4. List the open questions only the user can answer.\n"
+                "If something fundamental is unclear, use ask_user (it reaches the user on Telegram too) — but "
+                "prefer proposing sensible defaults in the flow and asking in its questions list.\n"
+                "Then call propose_flow. Do NOT write the build plan or build anything yet.")
+            if m.flow:
+                parts.append("YOUR PREVIOUS FLOW DRAFT:\n" + m.flow[:10000])
+            if m.plan_feedback:
+                parts.append("THE USER'S FEEDBACK / ANSWERS ON THE FLOW (apply all of them):\n- "
+                             + "\n- ".join(m.plan_feedback))
+        elif phase == "planning":
+            parts.append("PHASE: PLANNING. Research what you still need (web_search, fetch_url), save notes, then "
+                         "call submit_plan with the COMPLETE, detailed markdown plan and the ordered build steps. "
+                         "Do NOT build anything yet — the user approves the plan first.")
+            if m.flow:
+                parts.append("AGREED FLOW (the plan must implement exactly this, with the chosen stack):\n"
+                             + m.flow[:12000])
             if m.plan:
                 parts.append("PREVIOUS PLAN:\n" + m.plan[:12000])
             if m.plan_feedback:
@@ -221,10 +268,12 @@ class MissionControl:
             parts.append("PHASE: ROUTINE RUN #%d. Previous results:\n%s" % (m.runs + 1, "\n".join(prev) or "(first run)"))
         return "\n\n".join(parts)
 
-    def _tools(self, phase: str) -> list:
+    def _tools(self, phase: str, m: Mission | None = None) -> list:
         from core.pipeline_session import openai_tools
+        disc = m is not None and phase == "planning" and needs_flow(m)
         ctrl = [t for t in CONTROL_TOOLS
-                if not (t["function"]["name"] == "submit_plan" and phase != "planning")
+                if not (t["function"]["name"] == "propose_flow" and not disc)
+                and not (t["function"]["name"] == "submit_plan" and (phase != "planning" or disc))
                 and not (t["function"]["name"] == "complete_step" and phase != "executing")
                 and not (t["function"]["name"] == "ask_user" and phase == "routine")]
         reg = [t for t in openai_tools(self._decls)
@@ -253,7 +302,7 @@ class MissionControl:
 
     def _loop(self, m: Mission, ws: Workspace, phase: str):
         status = {"planning": "planning", "executing": "executing", "routine": "executing"}[phase]
-        tools = self._tools(phase)
+        tools = self._tools(phase, m)
         hist = list(m.history) or [{"role": "user", "content": "Begin." if phase != "executing"
                                     else "Continue the build from the first unfinished step."}]
         steps_used = 0
@@ -302,9 +351,23 @@ class MissionControl:
             q = str(args.get("question", ""))[:500]
             self.store.update(m, status="waiting_user", pending_question=q,
                               phase_note="planning" if phase == "planning" else "executing")
-            self._say(m, f"Question: {q}", True)
+            self._say(m, f"Question for you: {q} — reply here or on Telegram.", True)
             self._hook("notify", "Jarvis has a question", q)
             return "waiting for the user's answer", True
+        if name == "propose_flow":
+            flow = str(args.get("flow_markdown", ""))
+            qs = [str(q) for q in (args.get("questions") or []) if str(q).strip()][:12]
+            if qs:
+                flow += "\n\n## Questions for you\n" + "\n".join(f"{i + 1}. {q}" for i, q in enumerate(qs))
+            (Path(m.workspace) / "FLOW.md").write_text(flow, encoding="utf-8")
+            self.store.update(m, flow=flow, stage="flow", status="awaiting_plan_approval",
+                              phase_note="flow ready for discussion", history=[])
+            self._say(m, f"I've mapped out how {m.title} would work — the flow, the screens and the tech stack "
+                         f"options{', plus ' + str(len(qs)) + ' questions for you' if qs else ''}. Let's discuss it "
+                         f"before I write the detailed plan.", True)
+            self._hook("show_plan", m)
+            self._hook("notify", "Flow ready to discuss", m.title)
+            return "flow submitted; waiting for the user", True
         if name == "submit_plan":
             plan = str(args.get("plan_markdown", ""))
             steps = [{"title": str(s)[:160], "status": "todo"} for s in (args.get("steps") or [])][:30]

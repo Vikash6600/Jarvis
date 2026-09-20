@@ -1912,7 +1912,10 @@ class ModelHubOverlay(QWidget):
             get.setFont(QFont(FONT_MONO, 7)); get.setCursor(Qt.CursorShape.PointingHandCursor)
             get.setStyleSheet(f"QPushButton {{ background: transparent; color: {C.TEXT_MED}; border: none; }}"
                               f" QPushButton:hover {{ color: {C.PRI}; }}")
-            get.clicked.connect(lambda _=False, u=pre["url"]: QDesktopServices.openUrl(QUrl(u)))
+            if pid == "claudecode":
+                get.clicked.connect(lambda _=False, p=pid: self._claude_login(p))
+            else:
+                get.clicked.connect(lambda _=False, u=pre["url"]: QDesktopServices.openUrl(QUrl(u)))
             h.addWidget(get)
         v.addLayout(h)
         h2 = QHBoxLayout(); h2.setSpacing(6)
@@ -1943,6 +1946,10 @@ class ModelHubOverlay(QWidget):
         if prov.get("api_key") or (pre.get("local") and prov.get("tested")):
             self._set_status(pid, True, f"saved · {n} models")
         return box
+
+    def _claude_login(self, pid: str) -> None:
+        from core import claude_cli
+        self._set_status(pid, None, claude_cli.open_login_terminal())
 
     def _set_status(self, pid: str, ok: bool | None, msg: str) -> None:
         r = self._rows.get(pid)

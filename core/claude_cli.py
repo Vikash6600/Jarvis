@@ -54,6 +54,35 @@ def available() -> bool:
     return bool(find_cli())
 
 
+def signed_in(timeout: int = 60) -> tuple[bool, str]:
+    """(ok, message) — proves the CLI is installed AND logged in."""
+    if not find_cli():
+        return False, "Claude Code is not installed (it ships with the Claude desktop app)."
+    try:
+        run("Reply with exactly: OK", timeout=timeout)
+        return True, "Claude Code is signed in and ready."
+    except Exception as e:
+        msg = str(e)
+        if "logged in" in msg.lower():
+            return False, "Claude Code is installed but not signed in — press SIGN IN and type /login."
+        return False, f"Claude Code error: {msg[:160]}"
+
+
+def open_login_terminal() -> str:
+    """Open a terminal running the CLI so the user can type /login once."""
+    exe = find_cli()
+    if not exe:
+        return "Claude Code is not installed."
+    try:
+        if os.name == "nt":
+            subprocess.Popen(["cmd", "/c", "start", "", "cmd", "/k", f'"{exe}"'], shell=False)
+        else:
+            subprocess.Popen(["x-terminal-emulator", "-e", exe])
+        return "A terminal is open — type /login and finish the sign-in, then press TEST."
+    except Exception as e:
+        return f"Could not open a terminal: {e}. Run this yourself: {exe}"
+
+
 def _flatten(messages: list) -> str:
     out = []
     for m in messages:

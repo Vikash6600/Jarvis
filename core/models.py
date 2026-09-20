@@ -357,10 +357,9 @@ def fetch_models(p: dict, timeout: float = 12.0) -> list[str]:
     """Ask the provider for its model list. Raises with a readable message."""
     if p.get("kind") == "cli":
         from core import claude_cli
-        exe = claude_cli.find_cli()
-        if not exe:
-            raise RuntimeError("Claude Code CLI not found — install the Claude desktop app.")
-        claude_cli.run("Reply with exactly: OK", timeout=120)     # also proves you are signed in
+        ok, msg = claude_cli.signed_in(timeout=120)
+        if not ok:
+            raise RuntimeError(msg)
         return ["claude-code"]
     if p.get("kind") == "gemini":
         r = requests.get("https://generativelanguage.googleapis.com/v1beta/models",

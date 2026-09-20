@@ -7,6 +7,8 @@
   responsibilities), data model, dependencies, how it will be run and tested, build steps, open questions.
 
 ## Build
+- If delegate_coding is available, give it the implementation work (with the plan, the files and the
+  acceptance criteria) and review the result; otherwise write the files yourself.
 - Create files in the workspace with write_file / edit_file. Keep functions small, typed, with error handling.
 - Install dependencies and run with run_command (Python: `python -m pip install …`, `python main.py`).
 - Write at least a smoke test and run it. Read errors, fix, re-run — iterate until it works.

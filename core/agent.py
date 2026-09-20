@@ -219,6 +219,17 @@ class MissionControl:
         from core import access
         parts.append(access.RESTRICTED_RULES if access.is_restricted() else
                      "ACCESS MODE: FULL. Risky commands still ask the user on the HUD; destructive ones are refused.")
+        try:
+            from core import claude_cli
+            if claude_cli.available() and phase != "routine":
+                parts.append(
+                    "CODING: Claude Code is available through delegate_coding and is the best coder here. For "
+                    "real implementation work — a page, a feature, a refactor, a bug fix, several files at once "
+                    "— delegate it with full context (what to build, which files, the exact outcome, the style "
+                    "from the plan) instead of writing the files yourself. Keep doing the thinking, reviewing "
+                    "and reporting yourself; use write_file/edit_file directly only for small or single edits.")
+        except Exception:
+            pass
         if m.project:
             parts.append("This mission works INSIDE AN EXISTING PROJECT (the workspace). Before planning or "
                          "changing anything, list the project and read the files that matter so you follow its "

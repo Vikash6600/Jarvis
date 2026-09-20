@@ -39,6 +39,8 @@ never a generic template.
 
 ## Build (executing phase)
 - Work through the steps in order; `complete_step` after each.
+- If delegate_coding is available, hand each substantial build step to it (give it the plan's design
+  direction, the files and the exact outcome); review what it produced, then continue.
 - Write real, specific copy for the business — no lorem ipsum.
 - After the hero and after the full page are done, call `preview_site` with `review=true`, read the
   critique and console errors, and fix them. Repeat until the polish score is ≥ 8 or 3 review rounds.

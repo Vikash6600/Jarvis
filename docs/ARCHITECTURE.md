@@ -63,7 +63,7 @@ clap_launcher.py (separate, optional, pythonw) — listens only while Jarvis is 
 
 **Double clap** — asleep: mic frames → `ClapDetector.feed` → detector thread → `wake()` + globe ripple. Closed: `clap_launcher.py` → `main.py --wake`; a second launch writes `config/.wake_request` and exits.
 
-**Mission** — voice `start_mission` → `MissionControl.create` → supervisor starts a worker → PLANNING (research with tools, `submit_plan`) → HUD Mission Brief + Telegram → user APPROVE/REVISE → EXECUTING (`complete_step`…, `preview_site` review) → `finish` → toast, spoken update when idle, Telegram. Tool calls in the voice session run off the receive loop (`_dispatch_tools`), so the conversation never blocks.
+**Mission** — discovery flow → plan → (websites) design mockups → build → review. voice `start_mission` → `MissionControl.create` → supervisor starts a worker → PLANNING (research with tools, `submit_plan`) → HUD Mission Brief + Telegram → user APPROVE/REVISE → EXECUTING (`complete_step`…, `preview_site` review) → `finish` → toast, spoken update when idle, Telegram. Tool calls in the voice session run off the receive loop (`_dispatch_tools`), so the conversation never blocks.
 
 **Screen watch** — `_run_screen_watch` every 45 s (when enabled) → `_screen_glance` → VISION model → ALERT → spoken offer of help.
 

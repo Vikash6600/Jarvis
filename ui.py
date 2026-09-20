@@ -2170,7 +2170,14 @@ class MissionBriefOverlay(QWidget):
 
         body = QTextEdit(); body.setReadOnly(True); body.setFont(QFont(FONT_BODY, 11))
         flow_stage = mission.stage == "flow"
-        md = (mission.flow if flow_stage else mission.plan) or "_The plan is being prepared…_"
+        design_stage = mission.stage == "design"
+        md = (mission.design if design_stage else mission.flow if flow_stage else mission.plan) \
+            or "_The plan is being prepared…_"
+        if design_stage:
+            link = f"\n\n**Canvas:** {mission.design_url}" if getattr(mission, "design_url", "") else ""
+            md = ("## Design directions — pick one\n"
+                  "_Open the canvas, then say which you prefer (A or B) or what to change._\n\n"
+                  + md + link)
         if flow_stage:
             md = ("## How I understand it — let's agree this before the detailed plan\n"
                   "_Answer the questions or tell me what to change below; APPROVE when the flow is right._\n\n"
@@ -2183,9 +2190,29 @@ class MissionBriefOverlay(QWidget):
         body.setMarkdown(md)
         v.addWidget(body, 1)
 
+        if design_stage and mission.design_shots:
+            strip = QHBoxLayout(); strip.setSpacing(8)
+            for rel in mission.design_shots[:4]:
+                f = Path(mission.workspace) / rel
+                if not f.is_file():
+                    continue
+                pm = QPixmap(str(f))
+                if pm.isNull():
+                    continue
+                lbl = QLabel()
+                lbl.setPixmap(pm.scaled(300, 210, Qt.AspectRatioMode.KeepAspectRatio,
+                                        Qt.TransformationMode.SmoothTransformation))
+                lbl.setStyleSheet(f"border: 1px solid {C.BORDER_B};")
+                lbl.setToolTip(rel)
+                strip.addWidget(lbl)
+            strip.addStretch()
+            v.addLayout(strip)
+
         self._fb = QLineEdit()
         self._fb.setFont(QFont(FONT_MONO, 9))
-        self._fb.setPlaceholderText(("Answers to the questions, or what to change in the flow / stack…"
+        self._fb.setPlaceholderText(("Which variant, or what to change (e.g. 'B, but warmer and bigger hero')…"
+                                     if mission.stage == "design" else
+                                     "Answers to the questions, or what to change in the flow / stack…"
                                      if mission.stage == "flow" else
                                      "Changes you want (e.g. 'darker theme, add online ordering')")
                                     if mission.status == "awaiting_plan_approval" else
@@ -2209,8 +2236,9 @@ class MissionBriefOverlay(QWidget):
             b.clicked.connect(fn); row.addWidget(b)
         if mission.status == "awaiting_plan_approval":
             btn("CANCEL", False, lambda: self._do(lambda: control.cancel(self._m)))
-            btn("DISCUSS / CHANGE" if mission.stage == "flow" else "REVISE", False, self._revise)
-            btn("AGREE FLOW ▸" if mission.stage == "flow" else "APPROVE ▸", True,
+            btn({"flow": "DISCUSS / CHANGE", "design": "CHANGE DESIGN"}.get(mission.stage, "REVISE"),
+                False, self._revise)
+            btn({"flow": "AGREE FLOW ▸", "design": "USE THIS DESIGN ▸"}.get(mission.stage, "APPROVE ▸"), True,
                 lambda: self._do(lambda: control.approve(self._m)))
         elif mission.status == "waiting_user":
             btn("SEND ANSWER ▸", True, lambda: self._do(lambda: control.answer(self._m, self._fb.text())))
@@ -2219,6 +2247,9 @@ class MissionBriefOverlay(QWidget):
             btn("RESUME ▸", True, lambda: self._do(lambda: control.resume(self._m)))
         elif mission.status not in ("done", "cancelled"):
             btn("PAUSE", False, lambda: self._do(lambda: control.pause(self._m)))
+        if getattr(mission, "design_url", ""):
+            btn("OPEN DESIGN CANVAS ↗", False,
+                lambda u=mission.design_url: QDesktopServices.openUrl(QUrl(u)))
         btn("OPEN FOLDER", False, lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(mission.workspace)))
         v.addLayout(row)
 

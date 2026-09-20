@@ -113,7 +113,32 @@ class TelegramBridge:
             self._remember("jarvis", text)
             threading.Thread(target=self.send, args=(f"🤖 {text}",), daemon=True).start()
 
+    def send_photo(self, path, caption: str = "") -> bool:
+        chat = _cfg().get("chat_id")
+        tok = _cfg().get("token")
+        if not (chat and tok):
+            return False
+        try:
+            with open(path, "rb") as f:
+                r = requests.post(f"{self.api}/bot{tok}/sendPhoto", data={"chat_id": chat, "caption": caption[:900]},
+                                  files={"photo": f}, timeout=60)
+            return bool(r.ok)
+        except Exception as e:
+            print(f"[Telegram] sendPhoto: {e}")
+            return False
+
     def send_plan(self, m) -> None:
+        if getattr(m, "stage", "") == "design":
+            from pathlib import Path as _P
+            link = getattr(m, "design_url", "")
+            self.send(f"🎨 DESIGN DIRECTIONS — #{m.id} {m.title}\n\n"
+                      + (f"Open the canvas: {link}\n\n" if link else "")
+                      + f"{(m.design or '')[:3000]}\n\nReply with the one you want (A or B) or what to change.")
+            for rel in (m.design_shots or [])[:4]:
+                p = _P(m.workspace) / rel
+                if p.is_file():
+                    self.send_photo(p, caption=rel)
+            return
         if getattr(m, "stage", "") == "flow":
             body = (m.flow or "")[:7000]
             msg = (f"🧭 FLOW TO DISCUSS — #{m.id} {m.title}\n\n{body}\n\n"

@@ -47,6 +47,11 @@ _SKIP_REGISTRY = {"dev_agent"}   # the agent does this itself, in the workspace
 FLOW_KINDS = ("website", "code", "research")
 
 
+def needs_design(m: Mission) -> bool:
+    """Visual work gets mockups from Claude before the real build starts."""
+    return m.kind == "website" and not m.design_approved
+
+
 def needs_flow(m: Mission) -> bool:
     """Builds get a discovery stage first: agree the flow, then plan the build."""
     return m.kind in FLOW_KINDS and not m.flow_approved
@@ -145,6 +150,11 @@ class MissionControl:
             return f"Mission #{m.id} is {m.status}, not waiting for plan approval."
         if changes.strip():
             return self.revise(m, changes)
+        if m.stage == "design":
+            self.store.update(m, design_approved=True, stage="", status="executing", history=[],
+                              phase_note="building the approved design")
+            self._say(m, "Design approved — building it now.", True)
+            return f"Design for #{m.id} approved; building."
         if m.stage == "flow":
             self.store.update(m, flow_approved=True, stage="", status="planning", history=[],
                               phase_note="writing the detailed plan")
@@ -156,8 +166,9 @@ class MissionControl:
 
     def revise(self, m: Mission, feedback: str) -> str:
         m.plan_feedback.append(feedback.strip())
-        what = "flow" if m.stage == "flow" else "plan"
-        self.store.update(m, status="planning", stage="", history=[], phase_note=f"revising the {what}")
+        what = {"flow": "flow", "design": "design"}.get(m.stage, "plan")
+        back = "executing" if what == "design" else "planning"
+        self.store.update(m, status=back, stage="", history=[], phase_note=f"revising the {what}")
         self._say(m, f"Revising the {what}: {feedback.strip()}")
         return f"Revising the {what} for #{m.id}."
 
@@ -192,7 +203,14 @@ class MissionControl:
     def _work(self, m: Mission):
         ws = Workspace(m.workspace, log=lambda s: None)
         try:
-            phase = "routine" if m.kind == "routine" else ("planning" if m.status == "planning" else "executing")
+            if m.kind == "routine":
+                phase = "routine"
+            elif m.status == "planning":
+                phase = "planning"
+            elif needs_design(m):
+                phase = "design"
+            else:
+                phase = "executing"
             self._loop(m, ws, phase)
         except _Stop:
             pass
@@ -300,11 +318,29 @@ class MissionControl:
             if m.plan_feedback:
                 parts.append("THE USER ASKED FOR THESE CHANGES (apply all of them):\n- "
                              + "\n- ".join(m.plan_feedback))
+        elif phase == "design":
+            parts.append(
+                "PHASE: DESIGN — use CLAUDE DESIGN, not code. The user judges this with their eyes, so they get "
+                "a proper design canvas to open, comment on and edit.\n"
+                "1. Call design_canvas ONCE with a full brief written from the approved plan: product and "
+                "audience, the screens and their sections, the palette with hex codes, fonts and type scale, "
+                "spacing and radius, the signature interactions/motion, the real copy, and what makes "
+                "direction A different from direction B.\n"
+                "2. It returns a canvas link with artboards for the key screens, a mobile view and a style "
+                "tile, in two directions.\n"
+                "3. Call submit_design with that canvas_url and a few lines describing A and B. Then stop: the "
+                "user picks a direction (or asks for changes) before anything is built.\n"
+                "Only if design_canvas is unavailable, fall back to two HTML mockups in design/ reviewed with "
+                "preview_site.")
         elif phase == "executing":
             steps = "\n".join(f"{i}. [{s.get('status', 'todo')}] {s.get('title')}" for i, s in enumerate(m.steps))
             parts.append("PHASE: EXECUTING the approved plan. Continue from the first unfinished step. Call "
                          "complete_step after each step; when everything is done and reviewed, call finish.")
             parts.append("APPROVED PLAN:\n" + (m.plan or "(no plan — work directly from the goal)")[:12000])
+            if m.design_url or m.design:
+                parts.append("APPROVED DESIGN — build exactly this. Open the canvas with your Artifact tool "
+                             "(read its artboards) and match the layout, palette, type, spacing and motion:\n"
+                             + (m.design_url + "\n" if m.design_url else "") + m.design[:4000])
             parts.append("STEPS:\n" + (steps or "(none)"))
         else:
             prev = [e["msg"] for e in m.log if e["msg"].startswith("Result:")][-3:]
@@ -315,7 +351,9 @@ class MissionControl:
         from core.pipeline_session import openai_tools
         disc = m is not None and phase == "planning" and needs_flow(m)
         ctrl = [t for t in CONTROL_TOOLS
-                if not (t["function"]["name"] == "propose_flow" and not disc)
+                if not (t["function"]["name"] == "submit_design" and phase != "design")
+                and not (t["function"]["name"] == "finish" and phase == "design")
+                and not (t["function"]["name"] == "propose_flow" and not disc)
                 and not (t["function"]["name"] == "submit_plan" and (phase != "planning" or disc))
                 and not (t["function"]["name"] == "complete_step" and phase != "executing")
                 and not (t["function"]["name"] == "ask_user" and phase == "routine")]
@@ -352,7 +390,8 @@ class MissionControl:
 
     def _loop(self, m: Mission, ws: Workspace, phase: str):
         from core import router
-        status = {"planning": "planning", "executing": "executing", "routine": "executing"}[phase]
+        status = {"planning": "planning", "design": "executing",
+                  "executing": "executing", "routine": "executing"}[phase]
         role = router.for_phase(m.kind, phase)
         _r, _p, _mod, _why = router.pick(m.goal, role=role, exclude_cli=True)
         print(f"[Route] mission #{m.id} {phase} → {(_p or {}).get('preset', '?')}/{_mod} ({_why})")
@@ -433,6 +472,19 @@ class MissionControl:
             self._hook("show_plan", m)
             self._hook("notify", "Plan ready for approval", m.title)
             return "plan submitted; waiting for approval", True
+        if name == "submit_design":
+            shots = [str(s) for s in (args.get("screenshots") or [])][:8]
+            notes = str(args.get("notes_markdown", ""))
+            url = str(args.get("canvas_url") or "")
+            (Path(m.workspace) / "DESIGN.md").write_text((url + "\n\n" if url else "") + notes, encoding="utf-8")
+            self.store.update(m, design=notes, design_shots=shots, design_url=url, stage="design",
+                              status="awaiting_plan_approval", phase_note="designs ready", history=[])
+            self._say(m, f"Two design directions for {m.title} are ready"
+                         + (f" — open the canvas: {url}" if url else " to look at")
+                         + ". Pick one or tell me what to change.", True)
+            self._hook("show_plan", m)
+            self._hook("notify", "Designs ready to review", m.title)
+            return "designs submitted; waiting for the user's choice", True
         if name == "complete_step":
             i = int(args.get("index", -1))
             if 0 <= i < len(m.steps):

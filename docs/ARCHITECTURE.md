@@ -39,6 +39,7 @@ clap_launcher.py (separate, optional, pythonw) — listens only while Jarvis is 
 | `core/telegram_bridge.py` | Telegram long-poll bridge: pairing, commands, missions, chat replies, pushes. |
 | `core/notify.py` | Desktop toasts. |
 | `core/mind.py` | Unified memory (`memory/mind.json`): facts, preferences, lessons, events; `brief_for(goal)` for missions, `digest()` for the voice/Telegram prompt, `distil(mission)` after a mission ends. |
+| `core/router.py` | Picks the JOB for a piece of work (code / vision / search / smart / fast / chat) from cheap signals, then the healthiest model for it; `for_phase` gives each mission phase its job. |
 | `core/access.py` | FULL / RESTRICTED access modes and the restricted rule text. |
 | `core/claude_cli.py` | Claude Code as a local provider (no API key): the `claudecode` model for the CODE job, and `delegate_coding` for missions. |
 | `plugins/gmail.py`, `plugins/google_calendar.py`, `plugins/_google_core.py` | Google OAuth (desktop flow) + Gmail/Calendar tools; send/create go through the HUD confirm gate. |
@@ -55,6 +56,8 @@ clap_launcher.py (separate, optional, pythonw) — listens only while Jarvis is 
 **Voice turn (Gemini Live)** — mic → `_listen_audio` → gate → `send_realtime_input` → Live → `_receive_audio` (audio → speaker, transcripts → log, tool_call → `_execute_tool` → `send_tool_response`).
 
 **Voice turn (pipeline)** — same, but `PipelineSession` cuts utterances by energy, transcribes with the STT job, asks the CHAT job's model with the tool list, speaks with edge-tts.
+
+**Routing** — `router.classify(text)` → job → `models.candidates(job)` → first model not cooling (429/404 skip), CLI agents excluded where tool-calling is needed. Missions route per phase: planning → AGENT, building code/websites → CODE, routines → FAST.
 
 **One-shot job** — action → `gemini.call(contents, tier)` → role (fast/smart/code/vision/search) → `models.candidates(role)` → first model that answers.
 

@@ -287,12 +287,19 @@ class MissionControl:
                if t["function"]["name"] not in WORKSPACE_TOOL_NAMES | CONTROL_TOOL_NAMES | _SKIP_REGISTRY]
         return WORKSPACE_TOOLS + ctrl + reg
 
-    def _chat(self, msgs, tools) -> dict:
+    def _chat(self, msgs, tools, role: str = "agent") -> dict:
         last = None
-        cands = models.candidates("agent") or models.candidates("smart") or models.candidates("chat")
+        seen = set()
+        cands = []
+        for r in (role, "agent", "smart", "chat"):
+            for pm in models.candidates(r):
+                key = (pm[0].get("id"), pm[1])
+                if key not in seen:
+                    seen.add(key)
+                    cands.append(pm)
         for prov, model in cands:
-            if models.cooling(prov, model):
-                continue
+            if models.cooling(prov, model) or prov.get("kind") == "cli":
+                continue            # the CLI agent has no tool-calling; it is used via delegate_coding
             try:
                 js = models.chat(prov, model, msgs, timeout=180, tools=tools, tool_choice="auto")
                 return (js.get("choices") or [{}])[0].get("message") or {}
@@ -308,7 +315,11 @@ class MissionControl:
             raise _Stop()
 
     def _loop(self, m: Mission, ws: Workspace, phase: str):
+        from core import router
         status = {"planning": "planning", "executing": "executing", "routine": "executing"}[phase]
+        role = router.for_phase(m.kind, phase)
+        _r, _p, _mod, _why = router.pick(m.goal, role=role, exclude_cli=True)
+        print(f"[Route] mission #{m.id} {phase} → {(_p or {}).get('preset', '?')}/{_mod} ({_why})")
         tools = self._tools(phase, m)
         hist = list(m.history) or [{"role": "user", "content": "Begin." if phase != "executing"
                                     else "Continue the build from the first unfinished step."}]
@@ -320,7 +331,7 @@ class MissionControl:
                 self._say(m, "I've used this session's step budget — say 'resume mission' to let me continue.", True)
                 return
             msgs = [{"role": "system", "content": self._system(m, phase)}] + _trim(hist)
-            msg = self._chat(msgs, tools)
+            msg = self._chat(msgs, tools, role)
             calls = msg.get("tool_calls") or []
             text = (msg.get("content") or "").strip() if isinstance(msg.get("content"), str) else ""
             if not calls:

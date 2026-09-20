@@ -448,6 +448,12 @@ def _route(contents, tier, config, timeout_ms):
         return tier
     if tier == SEARCH:
         return tier                    # grounding metadata only exists on Gemini
+    if tier == "auto":
+        try:
+            from core import router
+            tier = router.classify(contents if isinstance(contents, str) else "")
+        except Exception:
+            tier = SMART
     role = {FAST: "fast", SMART: "smart"}.get(tier, tier if tier in models.ROLES else None)
     if role is None:
         return tier                    # an explicit Gemini model name

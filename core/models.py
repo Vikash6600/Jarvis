@@ -114,26 +114,42 @@ _PROVIDER_PREF = {"code": ("claudecode", "anthropic", "deepseek", "openai", "mis
 
 
 # ── tags ─────────────────────────────────────────────────────────────────────
+def _parts(model: str) -> set[str]:
+    """Model name split into name parts, so 'gemini' never matches 'mini'."""
+    import re as _re
+    m = model.lower().split("/")[-1]
+    return {p for p in _re.split(r"[^a-z0-9]+", m) if p}
+
+
+def _has(model: str, words) -> bool:
+    parts = _parts(model)
+    return any(w in parts or any(p.startswith(w) or p.endswith(w) for p in parts) for w in words)
+
+
 def guess_tags(provider_id: str, model: str) -> list[str]:
     m = model.lower()
     tags: list[str] = []
-    if "whisper" in m or "transcrib" in m:
-        return ["stt"] if provider_id != "gemini" else ["other"]
-    if any(k in m for k in ("embed", "tts", "dall-e", "image", "moderation", "guard", "computer-use",
-                            "robotics", "aqa", "learnlm", "veo", "imagen", "lyria", "search-preview",
-                            "realtime", "audio-preview")):
-        return ["other"]
     if provider_id == "claudecode":
         return ["code", "reasoning"]
-    if any(k in m for k in ("coder", "codestral", "code", "deepseek", "claude", "gpt-4.1", "grok-4")):
+    if _has(m, ("whisper", "transcribe", "transcription")):
+        return ["stt"] if provider_id != "gemini" else ["other"]
+    if _has(m, ("embed", "embedding", "tts", "dalle", "image", "moderation", "guard", "robotics",
+                "aqa", "learnlm", "veo", "imagen", "lyria")) or "computer-use" in m \
+            or "search-preview" in m or "realtime" in m or "audio-preview" in m:
+        return ["other"]
+    if _has(m, ("coder", "codestral", "code", "deepseek")) or "claude" in m or "gpt-4.1" in m or "grok-4" in m:
         tags.append("code")
-    if any(k in m for k in ("4o", "4.1", "vision", "llava", "pixtral", "gemini", "claude", "grok-4", "gpt-5", "llama-4")):
+    if _has(m, ("4o", "vision", "llava", "pixtral", "gemini")) or "claude" in m or "gpt-4.1" in m \
+            or "grok-4" in m or "gpt-5" in m or "llama-4" in m:
         tags.append("vision")
-    if any(k in m for k in ("mini", "flash", "lite", "8b", "instant", "haiku", "small", "nano", "turbo")):
+    if _has(m, ("mini", "flash", "lite", "8b", "instant", "haiku", "small", "nano", "turbo")):
         tags.append("fast")
-    if any(k in m for k in ("o3", "o4", "r1", "reasoner", "opus", "pro", "large", "70b", "sonnet", "grok-4", "gpt-5", "4.1")):
+    if _has(m, ("o3", "o4", "r1", "reasoner", "reasoning", "opus", "pro", "large", "70b", "sonnet", "thinking")) \
+            or "grok-4" in m or "gpt-5" in m or "gpt-4.1" in m:
         tags.append("reasoning")
-    if "live" in m or "native-audio" in m:
+    if "fast" in tags and "reasoning" in tags and _has(m, ("pro", "opus", "large")):
+        tags.remove("fast")            # a Pro/Opus model is not the cheap one
+    if _has(m, ("live",)) or "native-audio" in m:
         tags = ["live"]
     return tags or ["chat"]
 

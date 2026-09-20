@@ -223,11 +223,16 @@ class MissionControl:
             from core import claude_cli
             if claude_cli.available() and phase != "routine":
                 parts.append(
-                    "CODING: Claude Code is available through delegate_coding and is the best coder here. For "
-                    "real implementation work — a page, a feature, a refactor, a bug fix, several files at once "
-                    "— delegate it with full context (what to build, which files, the exact outcome, the style "
-                    "from the plan) instead of writing the files yourself. Keep doing the thinking, reviewing "
-                    "and reporting yourself; use write_file/edit_file directly only for small or single edits.")
+                    "CODING BUDGET: Claude Code (delegate_coding) is the best coder here but its allowance is "
+                    "LIMITED, unlike your own model. Spend it well:\n"
+                    "- Delegate ONE call per build step (or fewer, batching related files) — never one call per "
+                    "file, never for trivial edits.\n"
+                    "- Put the whole spec for that step INSIDE the instruction (files, exact behaviour, design "
+                    "tokens, acceptance criteria) so Claude never has to explore the project or ask.\n"
+                    "- Name only the few files it must read.\n"
+                    "- Do everything else yourself: research, decisions, copy, small edits, config, reviewing "
+                    "screenshots, fixing one-line problems, and all reporting.\n"
+                    "- If it says its allowance is spent, carry on writing the code yourself from the plan.")
         except Exception:
             pass
         if m.project:
@@ -264,9 +269,22 @@ class MissionControl:
                 parts.append("THE USER'S FEEDBACK / ANSWERS ON THE FLOW (apply all of them):\n- "
                              + "\n- ".join(m.plan_feedback))
         elif phase == "planning":
-            parts.append("PHASE: PLANNING. Research what you still need (web_search, fetch_url), save notes, then "
-                         "call submit_plan with the COMPLETE, detailed markdown plan and the ordered build steps. "
-                         "Do NOT build anything yet — the user approves the plan first.")
+            parts.append(
+                "PHASE: PLANNING. Research what you still need (web_search, fetch_url), save notes, then call "
+                "submit_plan with a COMPLETE, IMPLEMENTATION-READY plan. Do NOT build anything yet.\n"
+                "The plan is the single source of truth a separate coder will build from WITHOUT asking "
+                "questions or exploring, so it must leave no decision open. It must contain:\n"
+                "- Summary, goals, audience, and the requirements checklist (mark assumptions).\n"
+                "- The agreed flow: journey, screens/sections and what is on each.\n"
+                "- DESIGN TOKENS where visual: exact hex palette with roles, font families and sizes/scale, "
+                "spacing/radius rules, and the named motion/interactions.\n"
+                "- FILE MAP: every file to create or change, one line each saying what it holds.\n"
+                "- DATA: shapes/schemas, storage, and the exact keys/fields.\n"
+                "- CONTENT: the real copy (or exactly where it comes from) — never 'lorem ipsum' or 'TBD'.\n"
+                "- BUILD STEPS: 6-12 steps; each step names the files it touches and its ACCEPTANCE CRITERIA "
+                "(what must be true when it is done).\n"
+                "- Open questions only for things genuinely needing the user.\n"
+                "Be precise and compact: specifics over prose, no filler, no repetition.")
             if m.flow:
                 parts.append("AGREED FLOW (the plan must implement exactly this, with the chosen stack):\n"
                              + m.flow[:12000])

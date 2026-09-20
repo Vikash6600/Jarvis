@@ -24,6 +24,42 @@ import subprocess
 from pathlib import Path
 
 TIMEOUT = 900
+USAGE_FILE = Path(__file__).resolve().parent.parent / "config" / "claude_usage.json"
+
+
+class LimitReached(RuntimeError):
+    """Claude's 5-hour or weekly allowance is spent — fall back to another model."""
+
+
+def _record(js: dict) -> None:
+    """Keep a small local tally so Jarvis can show and budget Claude usage."""
+    try:
+        import datetime
+        day = datetime.date.today().isoformat()
+        try:
+            data = json.loads(USAGE_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            data = {}
+        d = data.setdefault(day, {"calls": 0, "input": 0, "output": 0, "cost": 0.0})
+        u = js.get("usage") or {}
+        d["calls"] += 1
+        d["input"] += int(u.get("input_tokens") or 0) + int(u.get("cache_read_input_tokens") or 0)
+        d["output"] += int(u.get("output_tokens") or 0)
+        d["cost"] += float(js.get("total_cost_usd") or 0.0)
+        for k in list(data)[:-14]:
+            data.pop(k, None)                       # keep two weeks
+        USAGE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        USAGE_FILE.write_text(json.dumps(data, indent=1), encoding="utf-8")
+    except Exception:
+        pass
+
+
+def usage_today() -> dict:
+    try:
+        import datetime
+        return json.loads(USAGE_FILE.read_text(encoding="utf-8")).get(datetime.date.today().isoformat(), {})
+    except Exception:
+        return {}
 _SEARCH = [
     Path(os.environ.get("APPDATA", "")) / "Claude" / "claude-code",
     Path(os.environ.get("LOCALAPPDATA", "")) / "Claude" / "claude-code",
@@ -127,7 +163,11 @@ def run(prompt: str, cwd: str = "", tools: str = "read_only", timeout: int = TIM
         js = json.loads(out)
         if isinstance(js, dict):
             if js.get("is_error"):
-                raise RuntimeError(str(js.get("result") or js.get("error"))[:300])
+                err = str(js.get("result") or js.get("error"))[:300]
+                if any(k in err.lower() for k in ("usage limit", "rate limit", "quota", "limit reached")):
+                    raise LimitReached(err)
+                raise RuntimeError(err)
+            _record(js)
             return str(js.get("result") or js.get("text") or out)
     except json.JSONDecodeError:
         pass

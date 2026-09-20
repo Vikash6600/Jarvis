@@ -4,7 +4,9 @@
 - Clarify the goal into user stories and acceptance criteria. Research libraries/APIs with web_search and
   fetch_url when unsure; prefer well-maintained, simple dependencies.
 - Plan must include: summary, requirements checklist, architecture (modules/files and their
-  responsibilities), data model, dependencies, how it will be run and tested, build steps, open questions.
+  responsibilities), data model with exact fields, dependencies, how it will be run and tested, a file map,
+  build steps with acceptance criteria per step, and open questions.
+- Write it so a separate coder can implement it without asking anything or exploring the repo.
 
 ## Build
 - If delegate_coding is available, give it the implementation work (with the plan, the files and the

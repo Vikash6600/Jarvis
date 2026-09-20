@@ -24,7 +24,10 @@ never a generic template.
 6. **Assets** — generated SVG graphics/icons you will draw, image placeholders with descriptions
    (the user can swap in real photos later), copy you will write.
 7. **Tech** — see stack below; file structure.
-8. **Build steps** — the ordered list you pass as `steps` (6–12 concrete steps).
+8. **File map** — every file (index.html, css/styles.css, js/main.js, assets/…) with one line on what it holds.
+9. **Content** — the real headings, body copy, menu items/prices, testimonials and CTA text you will use.
+10. **Build steps** — the ordered list you pass as `steps` (6–12), each naming its files and its acceptance
+   criteria (e.g. "hero: full-viewport, GSAP intro, CTA scrolls to #order; passes contrast at 4.5:1").
 9. **Open questions** — anything only the user can answer (name, real prices, address…), with the
    placeholder you will use meanwhile.
 

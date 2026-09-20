@@ -68,3 +68,4 @@ memory/missions.json
 memory/missions.tmp
 memory/telegram_chat.json
 memory/mind.json
+config/claude_usage.json

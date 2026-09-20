@@ -253,18 +253,34 @@ class Workspace:
         return gemini.text(parts, tier=gemini.SMART, timeout_ms=90_000,
                            default="(no vision model answered — check the VISION job in AI MODELS)")
 
+    CLAUDE_BUDGET = 8          # delegate_coding calls per mission run
+
     def delegate_coding(self, instruction: str, files: str = "") -> str:
-        from core import access, claude_cli
+        from core import access, claude_cli, models
         if not claude_cli.available():
             return ("Claude Code is not installed here — write the code yourself with write_file/edit_file.")
+        self._claude_calls = getattr(self, "_claude_calls", 0)
+        if self._claude_calls >= self.CLAUDE_BUDGET:
+            return ("Claude budget for this run is spent (it has a limited allowance). Write the remaining "
+                    "code yourself with write_file/edit_file — you have the full spec in the plan.")
         restricted = access.is_restricted()
         task = instruction + (f"\n\nFiles involved: {files}" if files else "")
         if restricted:
             task += ("\n\nRULES: this is an existing project in RESTRICTED mode. Read the relevant files first, "
                      "follow the existing structure and style, make the smallest clear change, do not run "
                      "commands, do not commit, do not delete files.")
+        task += ("\n\nWork from this brief alone: read only the files you must, do not explore the rest of "
+                 "the project, and do not restate the code back to me. When done, reply with at most 10 lines: "
+                 "what you changed per file, and anything I must fix.")
         try:
+            self._claude_calls += 1
             out = claude_cli.run(task, cwd=str(self.root), tools="edit" if restricted else "full")
+        except claude_cli.LimitReached as e:
+            for prov in models.providers():
+                if prov.get("kind") == "cli":
+                    models.cool(prov, "claude-code", 5 * 3600)
+            return (f"Claude's allowance is spent ({str(e)[:120]}). Write the remaining code yourself with "
+                    f"write_file/edit_file — it resets in a few hours.")
         except Exception as e:
             msg = str(e)
             if "logged in" in msg.lower():

@@ -6219,6 +6219,16 @@ class MainWindow(QMainWindow):
                     ("VOICE", "Gemini Live" if _M.voice_engine() == "gemini_live" else "pipeline", C.PRI)]
             ag = _M.describe("agent")
             rows.append(("AGENT", ag.split(" / ", 1)[-1] if ag != "none" else "—", C.ACC2))
+            try:
+                from core import claude_cli as _CC
+                if _CC.available():
+                    u = _CC.usage_today()
+                    calls = int(u.get("calls") or 0)
+                    tok = int(u.get("input", 0)) + int(u.get("output", 0))
+                    rows.append(("CLAUDE", f"{calls} calls · {tok // 1000}k tok" if calls else "idle today",
+                                 C.GREEN if calls < 40 else C.RED))
+            except Exception:
+                pass
             for role, col in (("chat", C.GREEN), ("smart", C.GREEN), ("code", C.ACC2),
                               ("vision", "#b58cff"), ("stt", C.TEXT_MED)):
                 d = _M.describe(role)

@@ -1971,13 +1971,14 @@ class ModelHubOverlay(QWidget):
 
     def _test(self, pid: str) -> None:
         prov = self._collect(pid)
-        if prov["kind"] != "gemini" and not prov.get("base_url"):
+        if prov["kind"] not in ("gemini", "cli") and not prov.get("base_url"):
             self._set_status(pid, False, "enter a base URL")
             return
-        if not prov.get("api_key") and not self._M.PRESETS[pid].get("local") and pid != "custom":
+        if prov["kind"] != "cli" and not prov.get("api_key") \
+                and not self._M.PRESETS[pid].get("local") and pid != "custom":
             self._set_status(pid, False, "paste a key first")
             return
-        self._set_status(pid, None, "testing…")
+        self._set_status(pid, None, "testing… (Claude Code takes ~30 s)" if prov["kind"] == "cli" else "testing…")
 
         def work():
             try:
@@ -1989,6 +1990,11 @@ class ModelHubOverlay(QWidget):
 
     def _on_tested(self, pid: str, ok: bool, msg: str, names) -> None:
         self._set_status(pid, ok, msg)
+        self._status.setText(("✔ " if ok else "✖ ") + f"{self._M.PRESETS[pid]['label']}: {msg}")
+        self._status.setStyleSheet(f"color: {C.GREEN if ok else C.RED};")
+        win = self.window()
+        if hasattr(win, "_log"):
+            win._log.append_log(f"SYS: {self._M.PRESETS[pid]['label']} — {msg}")
         if ok and names is not None:
             prov = self._collect(pid)
             prov["models"] = list(names) or list(self._M.PRESETS[pid]["models"])

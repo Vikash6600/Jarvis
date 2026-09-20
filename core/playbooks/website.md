@@ -42,6 +42,12 @@ never a generic template.
 - Forms work client-side (validation + a friendly confirmation); note where a backend would plug in.
 - Accessible: semantic landmarks, alt text, focus styles, 4.5:1 contrast, keyboard-usable menus.
 
+## Design stage (before the build)
+- Two complete variants of the key page in design/a.html and design/b.html, built from the plan's tokens with
+  real copy and hand-drawn SVG — delegate both to Claude Code in one call (sonnet, effort high).
+- preview_site each, then submit_design with a short note per variant and the screenshot paths.
+- The user picks one (or asks for changes) before the real build starts.
+
 ## Build (executing phase)
 - Work through the steps in order; `complete_step` after each.
 - If delegate_coding is available, hand each substantial build step to it (give it the plan's design

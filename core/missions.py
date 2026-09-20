@@ -59,6 +59,9 @@ class Mission:
     stage: str = ""                                     # "flow" while the discovery flow is under review
     flow: str = ""                                      # discovery: how the product works, stack options
     flow_approved: bool = False
+    design: str = ""                                    # design stage: what Claude mocked up
+    design_shots: list = field(default_factory=list)    # screenshots of the mockups
+    design_approved: bool = False
     project: bool = False                               # workspace is an existing project folder
     steps: list = field(default_factory=list)          # [{"title", "status"}]
     log: list = field(default_factory=list)            # [{"t", "msg"}]

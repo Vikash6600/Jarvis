@@ -70,6 +70,10 @@ CONTROL_TOOLS = [
     _fn("submit_plan", "Planning phase only: submit the complete plan (markdown) and the ordered build "
         "steps. The mission then waits for the user's approval.",
         {"plan_markdown": S, "steps": {"type": "array", "items": S}}, ["plan_markdown", "steps"]),
+    _fn("submit_design", "DESIGN stage: submit the visual mockups for the user to choose from. Give a short "
+        "note on each variant (mood, palette, type, motion) and the screenshot paths from preview_site. "
+        "The mission waits for the user to pick one or ask for changes.",
+        {"notes_markdown": S, "screenshots": {"type": "array", "items": S}}, ["notes_markdown", "screenshots"]),
     _fn("complete_step", "Mark a build step done (0-based index) with a short note.",
         {"index": {"type": "integer"}, "note": S}, ["index"]),
     _fn("finish", "The mission (or this routine run) is complete. Give the final summary for the user.",

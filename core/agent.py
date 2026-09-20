@@ -232,6 +232,8 @@ class MissionControl:
                     "- Name only the few files it must read.\n"
                     "- Do everything else yourself: research, decisions, copy, small edits, config, reviewing "
                     "screenshots, fixing one-line problems, and all reporting.\n"
+                    "- Pass the model and effort the plan's EXECUTION PLAN chose for that step (default "
+                    "sonnet/medium; haiku/low for mechanical edits; opus or high+ only for genuinely hard work).\n"
                     "- If it says its allowance is spent, carry on writing the code yourself from the plan.")
         except Exception:
             pass
@@ -283,6 +285,11 @@ class MissionControl:
                 "- CONTENT: the real copy (or exactly where it comes from) — never 'lorem ipsum' or 'TBD'.\n"
                 "- BUILD STEPS: 6-12 steps; each step names the files it touches and its ACCEPTANCE CRITERIA "
                 "(what must be true when it is done).\n"
+                "- EXECUTION PLAN: a small table saying, per step, WHO builds it (me = your own model, free / "
+                "Claude Code = limited allowance), and for Claude steps WHICH MODEL and EFFORT: "
+                "haiku = small mechanical edits, sonnet = normal implementation (default), opus = only genuinely "
+                "hard architecture; effort low|medium|high|xhigh|max = how long it may think. Budget the whole "
+                "build to at most 8 Claude calls and say the expected total.\n"
                 "- Open questions only for things genuinely needing the user.\n"
                 "Be precise and compact: specifics over prose, no filler, no repetition.")
             if m.flow:

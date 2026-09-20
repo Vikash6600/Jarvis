@@ -48,7 +48,12 @@ WORKSPACE_TOOLS = [
         "workspace itself and reports what it changed. Use it for real implementation work (a feature, a "
         "refactor, a bug fix, a whole page) — give it the full context, the files involved and the exact "
         "outcome you want. It cannot ask you questions, so be specific.",
-        {"instruction": S, "files": S}, ["instruction"]),
+        {"instruction": S, "files": S,
+         "model": {"type": "string", "description": "haiku (small/mechanical) | sonnet (default, most work) | "
+                                                    "opus (hard architecture only) — Claude's allowance is limited"},
+         "effort": {"type": "string", "description": "low | medium | high | xhigh | max — thinking depth; "
+                                                     "use the plan's choice for this step"}},
+        ["instruction"]),
     _fn("look_at_screen", "Capture the user's screen and answer a question about it.", {"question": S}, ["question"]),
     _fn("open_in_browser", "Open a workspace file or a URL in the user's browser.", {"target": S}, ["target"]),
 ]
@@ -255,7 +260,7 @@ class Workspace:
 
     CLAUDE_BUDGET = 8          # delegate_coding calls per mission run
 
-    def delegate_coding(self, instruction: str, files: str = "") -> str:
+    def delegate_coding(self, instruction: str, files: str = "", model: str = "", effort: str = "") -> str:
         from core import access, claude_cli, models
         if not claude_cli.available():
             return ("Claude Code is not installed here — write the code yourself with write_file/edit_file.")
@@ -274,7 +279,12 @@ class Workspace:
                  "what you changed per file, and anything I must fix.")
         try:
             self._claude_calls += 1
-            out = claude_cli.run(task, cwd=str(self.root), tools="edit" if restricted else "full")
+            model = (model or "sonnet").strip().lower()
+            effort = (effort or "medium").strip().lower()
+            self._log(f"[Claude] {model}/{effort}: {instruction[:70]}")
+            out = claude_cli.run(task, cwd=str(self.root), tools="edit" if restricted else "full",
+                                 model=model if model in claude_cli.MODELS else "sonnet",
+                                 effort=effort if effort in claude_cli.EFFORTS else "medium")
         except claude_cli.LimitReached as e:
             for prov in models.providers():
                 if prov.get("kind") == "cli":

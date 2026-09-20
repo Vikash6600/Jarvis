@@ -7,6 +7,8 @@
   responsibilities), data model with exact fields, dependencies, how it will be run and tested, a file map,
   build steps with acceptance criteria per step, and open questions.
 - Write it so a separate coder can implement it without asking anything or exploring the repo.
+- Add an execution plan table: step | who builds it (me / Claude Code) | Claude model (haiku/sonnet/opus) |
+  effort (low…max) | why — inside a budget of 8 Claude calls.
 
 ## Build
 - If delegate_coding is available, give it the implementation work (with the plan, the files and the

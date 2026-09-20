@@ -28,6 +28,8 @@ never a generic template.
 9. **Content** — the real headings, body copy, menu items/prices, testimonials and CTA text you will use.
 10. **Build steps** — the ordered list you pass as `steps` (6–12), each naming its files and its acceptance
    criteria (e.g. "hero: full-viewport, GSAP intro, CTA scrolls to #order; passes contrast at 4.5:1").
+11. **Execution plan** — a table: step | who builds it (me / Claude Code) | Claude model (haiku, sonnet, opus)
+   | effort (low…max) | why. Keep the build inside 8 Claude calls; do copy, config, fixes and review yourself.
 9. **Open questions** — anything only the user can answer (name, real prices, address…), with the
    placeholder you will use meanwhile.
 

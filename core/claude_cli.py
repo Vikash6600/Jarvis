@@ -135,13 +135,19 @@ def _flatten(messages: list) -> str:
     return "\n\n".join(out)
 
 
+MODELS = ("haiku", "sonnet", "opus")          # cheapest → strongest
+EFFORTS = ("low", "medium", "high", "xhigh", "max")
+
+
 def run(prompt: str, cwd: str = "", tools: str = "read_only", timeout: int = TIMEOUT,
-        cli: str = "") -> str:
+        cli: str = "", model: str = "", effort: str = "") -> str:
     """Run Claude Code headlessly and return its final text.
 
-    tools: 'read_only'  answer/write code as text, no file changes (default)
-           'edit'       may read/write/edit files in cwd
-           'full'       may also run shell commands (only in Full access mode)
+    tools:  'read_only'  answer/write code as text, no file changes (default)
+            'edit'       may read/write/edit files in cwd
+            'full'       may also run shell commands (only in Full access mode)
+    model:  haiku | sonnet | opus (alias; empty = the CLI default)
+    effort: low | medium | high | xhigh | max — how long it may think
     """
     exe = cli or find_cli()
     if not exe:
@@ -153,6 +159,12 @@ def run(prompt: str, cwd: str = "", tools: str = "read_only", timeout: int = TIM
     cmd = [exe, "-p", prompt, "--output-format", "json",
            "--allowed-tools", allowed,
            "--permission-mode", "acceptEdits" if tools != "read_only" else "default"]
+    if model:
+        cmd += ["--model", model]
+        if model in ("opus", "sonnet"):
+            cmd += ["--fallback-model", "sonnet" if model == "opus" else "haiku"]
+    if effort in EFFORTS:
+        cmd += ["--effort", effort]
     r = subprocess.run(cmd, cwd=cwd or None, capture_output=True, text=True, encoding="utf-8",
                        errors="replace", timeout=timeout,
                        creationflags=0x08000000 if os.name == "nt" else 0)

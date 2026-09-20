@@ -28,3 +28,7 @@ First look at `logs/jarvis.jsonl` (one JSON object per line; newest at the botto
 | Telegram silent | `core/telegram_bridge.py` | Token not set/paired → Plugin Settings → Telegram → CONNECT, then send the 6-digit code to the bot. Only the paired chat is answered. |
 | Gmail/Calendar "isn't connected" | `plugins/_google_core.py` | Add the OAuth Desktop-app client_secret path in Plugin Settings → Google and press SIGN IN. |
 | Screen watch never speaks | `main._run_screen_watch` | It only speaks for errors/dialogs, when awake and idle; check `WATCH:` lines in the log. |
+| "Claude Code is installed but not signed in" | `core/claude_cli.py` | Run the CLI once in a terminal and sign in: `& "$env:APPDATA\Claude\claude-code\*\claude.exe"` then `/login`. |
+| Coding jobs don't use Claude | AI MODELS | Press TEST on "Claude Code" (proves sign-in), then leave CODE on AUTO or pin claudecode/claude-code. |
+| Restricted mode refuses something you want | ⚙ → ACCESS | Switch to FULL access (only from the control deck, never by voice). |
+| Jarvis repeats an old mistake | `core/mind.py` | Lessons are distilled after each mission into memory/mind.json; say "remember that …" to add one directly. |

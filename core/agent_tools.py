@@ -44,6 +44,11 @@ WORKSPACE_TOOLS = [
     _fn("preview_site", "Serve the workspace as a website and take screenshots at desktop and phone widths. "
         "With review=true a vision model critiques the design against the plan.",
         {"page": S, "review": {"type": "boolean"}, "focus": S}),
+    _fn("delegate_coding", "Hand a coding job to Claude Code, which reads, writes and edits the files in this "
+        "workspace itself and reports what it changed. Use it for real implementation work (a feature, a "
+        "refactor, a bug fix, a whole page) — give it the full context, the files involved and the exact "
+        "outcome you want. It cannot ask you questions, so be specific.",
+        {"instruction": S, "files": S}, ["instruction"]),
     _fn("look_at_screen", "Capture the user's screen and answer a question about it.", {"question": S}, ["question"]),
     _fn("open_in_browser", "Open a workspace file or a URL in the user's browser.", {"target": S}, ["target"]),
 ]
@@ -247,6 +252,26 @@ class Workspace:
             parts.append(types.Part.from_bytes(data=data, mime_type="image/png"))
         return gemini.text(parts, tier=gemini.SMART, timeout_ms=90_000,
                            default="(no vision model answered — check the VISION job in AI MODELS)")
+
+    def delegate_coding(self, instruction: str, files: str = "") -> str:
+        from core import access, claude_cli
+        if not claude_cli.available():
+            return ("Claude Code is not installed here — write the code yourself with write_file/edit_file.")
+        restricted = access.is_restricted()
+        task = instruction + (f"\n\nFiles involved: {files}" if files else "")
+        if restricted:
+            task += ("\n\nRULES: this is an existing project in RESTRICTED mode. Read the relevant files first, "
+                     "follow the existing structure and style, make the smallest clear change, do not run "
+                     "commands, do not commit, do not delete files.")
+        try:
+            out = claude_cli.run(task, cwd=str(self.root), tools="edit" if restricted else "full")
+        except Exception as e:
+            msg = str(e)
+            if "logged in" in msg.lower():
+                return ("Claude Code is installed but not signed in — the user must run `claude` once in a "
+                        "terminal and sign in. Write the code yourself with write_file/edit_file for now.")
+            return f"Claude Code failed: {msg[:300]}. Write the code yourself instead."
+        return out[:MAX_OUT]
 
     def look_at_screen(self, question: str) -> str:
         import io

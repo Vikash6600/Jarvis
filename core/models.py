@@ -91,16 +91,21 @@ PRESETS: dict[str, dict] = {
     "lmstudio": {"label": "LM Studio (local)", "kind": "openai_compat", "base_url": "http://localhost:1234/v1",
                  "hint": "no key needed", "url": "https://lmstudio.ai", "local": True,
                  "models": []},
+    "claudecode": {"label": "Claude Code (your subscription — no API key)", "kind": "cli", "base_url": "",
+                   "hint": "no key — sign in once in a terminal", "url": "https://claude.com/claude-code",
+                   "local": True, "no_url": True, "models": ["claude-code"]},
     "custom": {"label": "Custom (OpenAI-compatible)", "kind": "openai_compat", "base_url": "",
                "hint": "key (optional)", "url": "", "models": []},
 }
-PRESET_ORDER = ("gemini", "openai", "anthropic", "groq", "openrouter", "deepseek",
+PRESET_ORDER = ("gemini", "claudecode", "openai", "anthropic", "groq", "openrouter", "deepseek",
                 "mistral", "xai", "together", "ollama", "lmstudio", "custom")
+# Roles that need real function-calling; the Claude Code CLI answers in text only.
+TOOL_ROLES = ("agent", "chat", "stt", "vision", "search")
 
 # Sensible preference when a role is on "auto" and several providers qualify.
-_PROVIDER_PREF = {"agent": ("anthropic", "openai", "gemini", "xai", "deepseek", "mistral", "openrouter", "groq"),
+_PROVIDER_PREF = {"code": ("claudecode", "anthropic", "deepseek", "openai", "mistral", "xai", "gemini", "groq"),
+                  "agent": ("anthropic", "openai", "gemini", "xai", "deepseek", "mistral", "openrouter", "groq"),
                   "smart": ("anthropic", "openai", "gemini", "xai", "deepseek", "mistral", "groq", "openrouter"),
-                  "code": ("anthropic", "deepseek", "openai", "mistral", "xai", "gemini", "groq"),
                   "vision": ("gemini", "openai", "anthropic", "mistral", "xai"),
                   "fast": ("groq", "gemini", "openai", "anthropic", "mistral", "deepseek"),
                   "chat": ("groq", "openai", "anthropic", "gemini", "deepseek", "xai", "mistral"),
@@ -118,6 +123,8 @@ def guess_tags(provider_id: str, model: str) -> list[str]:
                             "robotics", "aqa", "learnlm", "veo", "imagen", "lyria", "search-preview",
                             "realtime", "audio-preview")):
         return ["other"]
+    if provider_id == "claudecode":
+        return ["code", "reasoning"]
     if any(k in m for k in ("coder", "codestral", "code", "deepseek", "claude", "gpt-4.1", "grok-4")):
         tags.append("code")
     if any(k in m for k in ("4o", "4.1", "vision", "llava", "pixtral", "gemini", "claude", "grok-4", "gpt-5", "llama-4")):
@@ -179,6 +186,15 @@ def providers() -> list[dict]:
     out = []
     for p in provs:
         if p.get("enabled", True) is False:
+            continue
+        if p.get("kind") == "cli":
+            try:
+                from core import claude_cli
+                if not claude_cli.available():
+                    continue
+            except Exception:
+                continue
+            out.append(p)
             continue
         if p.get("kind") != "gemini" and not p.get("base_url"):
             continue
@@ -273,6 +289,8 @@ def candidates(role: str) -> list[tuple[dict, str]]:
             continue
         if role == "stt" and ("stt" not in tags or p.get("kind") == "gemini"):
             continue
+        if p.get("kind") == "cli" and role in TOOL_ROLES:
+            continue                       # text-only: cannot drive tool calls
         if role != "stt" and "stt" in tags:
             continue
         hit = sum(1 for t in want if t in tags)
@@ -321,6 +339,13 @@ def _headers(p: dict) -> dict:
 
 def fetch_models(p: dict, timeout: float = 12.0) -> list[str]:
     """Ask the provider for its model list. Raises with a readable message."""
+    if p.get("kind") == "cli":
+        from core import claude_cli
+        exe = claude_cli.find_cli()
+        if not exe:
+            raise RuntimeError("Claude Code CLI not found — install the Claude desktop app.")
+        claude_cli.run("Reply with exactly: OK", timeout=120)     # also proves you are signed in
+        return ["claude-code"]
     if p.get("kind") == "gemini":
         r = requests.get("https://generativelanguage.googleapis.com/v1beta/models",
                          params={"key": p.get("api_key", ""), "pageSize": 200}, timeout=timeout)
@@ -365,6 +390,9 @@ def cool(p: dict, model: str, seconds: int = 300) -> None:
 
 def chat(p: dict, model: str, messages: list, timeout: float = 60.0, **extra) -> dict:
     """One OpenAI-style /chat/completions call. Returns the raw JSON."""
+    if p.get("kind") == "cli":
+        from core import claude_cli
+        return claude_cli.chat(messages, timeout=int(timeout) or 900)
     body = {"model": model, "messages": messages}
     body.update({k: v for k, v in extra.items() if v is not None})
     url = _base(p) + "/chat/completions"

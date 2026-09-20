@@ -283,7 +283,13 @@ class TelegramBridge:
             d_, n_ = m.progress
             return f"{m.short()} · steps {d_}/{n_}\n" + "\n".join("• " + e["msg"] for e in m.log[-5:])
         summary = "\n".join(x.short() for x in st.all()[-6:]) or "none"
-        chat = (f"You are J.A.R.V.I.S., the user's personal AI, replying on Telegram — concise, warm, helpful. "
+        try:
+            from core import mind
+            memo = mind.brief_for(text)
+        except Exception:
+            memo = ""
+        chat = (f"{memo}\n\n" if memo else "") + (
+                f"You are J.A.R.V.I.S., the user's personal AI, replying on Telegram — concise, warm, helpful. "
                 f"You can start background missions for real work; if they describe something to build, "
                 f"offer to start it. Missions:\n{summary}\n\nConversation so far:\n{self._transcript()}\n\n"
                 f"Reply to the user's last message.")

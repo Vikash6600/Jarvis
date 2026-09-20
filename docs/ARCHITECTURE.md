@@ -38,6 +38,9 @@ clap_launcher.py (separate, optional, pythonw) — listens only while Jarvis is 
 | `core/playbooks/*.md` | Expert instructions per mission kind (website, code, research, general, routine). |
 | `core/telegram_bridge.py` | Telegram long-poll bridge: pairing, commands, missions, chat replies, pushes. |
 | `core/notify.py` | Desktop toasts. |
+| `core/mind.py` | Unified memory (`memory/mind.json`): facts, preferences, lessons, events; `brief_for(goal)` for missions, `digest()` for the voice/Telegram prompt, `distil(mission)` after a mission ends. |
+| `core/access.py` | FULL / RESTRICTED access modes and the restricted rule text. |
+| `core/claude_cli.py` | Claude Code as a local provider (no API key): the `claudecode` model for the CODE job, and `delegate_coding` for missions. |
 | `plugins/gmail.py`, `plugins/google_calendar.py`, `plugins/_google_core.py` | Google OAuth (desktop flow) + Gmail/Calendar tools; send/create go through the HUD confirm gate. |
 | `plugins/telegram_remote.py` | Telegram settings (token, pairing) + `telegram_send` tool. |
 | `core/jlog.py` | JSON-lines logging to `logs/jarvis.jsonl`, stdout/stderr tee. |
@@ -60,6 +63,8 @@ clap_launcher.py (separate, optional, pythonw) — listens only while Jarvis is 
 **Mission** — voice `start_mission` → `MissionControl.create` → supervisor starts a worker → PLANNING (research with tools, `submit_plan`) → HUD Mission Brief + Telegram → user APPROVE/REVISE → EXECUTING (`complete_step`…, `preview_site` review) → `finish` → toast, spoken update when idle, Telegram. Tool calls in the voice session run off the receive loop (`_dispatch_tools`), so the conversation never blocks.
 
 **Screen watch** — `_run_screen_watch` every 45 s (when enabled) → `_screen_glance` → VISION model → ALERT → spoken offer of help.
+
+**Memory** — save_memory / mission finish → `mind.remember` / `mind.distil` → `memory/mind.json` → read back by the voice prompt (`digest`), missions (`brief_for`) and Telegram chat.
 
 **Risky code** — tool → `run_guarded(text, run)` → blocked / HUD approval (`confirm.request`) / run.
 

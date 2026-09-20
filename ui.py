@@ -1907,7 +1907,8 @@ class ModelHubOverlay(QWidget):
         st.setFont(QFont(FONT_MONO, 7)); st.setStyleSheet(f"color: {C.TEXT_DIM};")
         h.addWidget(st, 1)
         if pre.get("url"):
-            get = QPushButton("GET KEY ↗" if not pre.get("local") else "DOWNLOAD ↗")
+            get = QPushButton("GET KEY ↗" if not pre.get("local") else
+                              ("SIGN IN ↗" if pre.get("no_url") else "DOWNLOAD ↗"))
             get.setFont(QFont(FONT_MONO, 7)); get.setCursor(Qt.CursorShape.PointingHandCursor)
             get.setStyleSheet(f"QPushButton {{ background: transparent; color: {C.TEXT_MED}; border: none; }}"
                               f" QPushButton:hover {{ color: {C.PRI}; }}")
@@ -1916,7 +1917,7 @@ class ModelHubOverlay(QWidget):
         v.addLayout(h)
         h2 = QHBoxLayout(); h2.setSpacing(6)
         url = None
-        if pre.get("local") or pid == "custom":
+        if (pre.get("local") or pid == "custom") and not pre.get("no_url"):
             url = QLineEdit(prov.get("base_url") or pre["base_url"])
             url.setPlaceholderText("https://host/v1")
             url.setFont(QFont(FONT_MONO, 8)); url.setFixedHeight(28)

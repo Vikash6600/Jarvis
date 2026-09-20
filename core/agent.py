@@ -225,6 +225,13 @@ class MissionControl:
                          "existing structure, conventions and patterns. Change as little as needed, clearly.")
         if m.answer:
             parts.append(f"The user's latest answer to your question: {m.answer}")
+        try:
+            from core import mind
+            brief = mind.brief_for(f"{m.goal} {m.kind}")
+            if brief:
+                parts.append(brief)
+        except Exception:
+            pass
         if phase == "planning" and needs_flow(m):
             parts.append(
                 "PHASE: DISCOVERY (before any plan). Understand the idea deeply first:\n"
@@ -454,6 +461,15 @@ class MissionControl:
             if not (Path(m.workspace) / "REPORT.md").exists() else None
         self.store.update(m, status="done", result=summary[:2000], phase_note="complete", history=[])
         self._say(m, f"Mission complete — {summary[:500]}", True)
+        # Remember what this job taught, for the next one.
+        def _learn(mm=m):
+            try:
+                from core import mind
+                mind.remember("event", f"{mm.title}: {summary[:200]}", tags=[mm.kind], source=f"mission #{mm.id}")
+                mind.distil(mm)
+            except Exception as e:
+                print(f"[Mind] {e}")
+        threading.Thread(target=_learn, daemon=True, name=f"learn-{m.id}").start()
         self._hook("notify", "Mission complete", f"{m.title}: {summary[:200]}")
 
 

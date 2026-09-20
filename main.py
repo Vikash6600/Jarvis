@@ -1322,6 +1322,13 @@ class JarvisLive:
         parts = [time_ctx, identity_ctx]
         if mem_str:
             parts.append(mem_str)
+        try:
+            from core import mind as _mind
+            _dig = _mind.digest()
+            if _dig:
+                parts.append(_dig)
+        except Exception:
+            pass
         parts.append(sys_prompt)
         # Kept for the speech-pipeline engine (core/pipeline_session.py), which
         # takes the same prompt and tools as the Live session.
@@ -1435,6 +1442,12 @@ class JarvisLive:
             value    = args.get("value", "")
             if key and value:
                 update_memory({category: {key: {"value": value}}})
+                try:
+                    from core import mind as _mind
+                    _mind.remember("pref" if category == "preferences" else "fact",
+                                   f"{key}: {value}", tags=[category], source="conversation")
+                except Exception:
+                    pass
                 print(f"[Memory] 💾 save_memory: {category}/{key} = {value}")
             if not self.ui.muted:
                 self.ui.set_state("LISTENING")

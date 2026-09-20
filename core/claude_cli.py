@@ -75,7 +75,10 @@ def open_login_terminal() -> str:
         return "Claude Code is not installed."
     try:
         if os.name == "nt":
-            subprocess.Popen(["cmd", "/c", "start", "", "cmd", "/k", f'"{exe}"'], shell=False)
+            # No extra quoting: cmd's `start` mangles pre-quoted paths, and
+            # subprocess already quotes arguments that need it.
+            subprocess.Popen(["cmd", "/c", "start", "Claude Code sign-in", "cmd", "/k", exe],
+                             shell=False, cwd=str(Path.home()))
         else:
             subprocess.Popen(["x-terminal-emulator", "-e", exe])
         return "A terminal is open — type /login and finish the sign-in, then press TEST."

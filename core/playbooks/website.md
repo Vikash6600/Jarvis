@@ -43,10 +43,13 @@ never a generic template.
 - Accessible: semantic landmarks, alt text, focus styles, 4.5:1 contrast, keyboard-usable menus.
 
 ## Design stage (before the build)
-- Two complete variants of the key page in design/a.html and design/b.html, built from the plan's tokens with
-  real copy and hand-drawn SVG — delegate both to Claude Code in one call (sonnet, effort high).
-- preview_site each, then submit_design with a short note per variant and the screenshot paths.
-- The user picks one (or asks for changes) before the real build starts.
+- Use CLAUDE DESIGN: one design_canvas call with a full brief from the plan (screens and sections, palette
+  hex codes, fonts and scale, spacing, motion, real copy, and how direction A differs from B).
+- It returns a canvas link with artboards: key screens at desktop width, a mobile view and a style tile.
+- submit_design with that canvas_url plus a few lines on A and B; the user opens it, edits or comments, and
+  picks a direction before the build starts.
+- Only if the canvas is unavailable: two HTML mockups in design/ reviewed with preview_site.
+- When building, open the approved canvas and match it exactly.
 
 ## Build (executing phase)
 - Work through the steps in order; `complete_step` after each.

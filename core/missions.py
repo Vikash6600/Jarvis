@@ -62,6 +62,7 @@ class Mission:
     design: str = ""                                    # design stage: what Claude mocked up
     design_shots: list = field(default_factory=list)    # screenshots of the mockups
     design_approved: bool = False
+    design_url: str = ""                                # Claude Design canvas link
     project: bool = False                               # workspace is an existing project folder
     steps: list = field(default_factory=list)          # [{"title", "status"}]
     log: list = field(default_factory=list)            # [{"t", "msg"}]

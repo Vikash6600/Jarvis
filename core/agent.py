@@ -320,22 +320,27 @@ class MissionControl:
                              + "\n- ".join(m.plan_feedback))
         elif phase == "design":
             parts.append(
-                "PHASE: DESIGN. Before building the real thing, produce VISUAL MOCKUPS for the user to look at "
-                "and choose from — this is the part they judge with their eyes.\n"
-                "1. Build TWO distinct variants of the most important page in design/ (design/a.html, "
-                "design/b.html), each a complete standalone page using the plan's palette, fonts, spacing and "
-                "signature motion — real copy, real hand-drawn SVG, no placeholders. Delegate this to Claude "
-                "Code (delegate_coding, model sonnet, effort high) in ONE call for both variants: it is the "
-                "best designer available and this is the step worth spending it on.\n"
-                "2. preview_site each variant (page='design/a.html' then 'design/b.html') to get desktop and "
-                "phone screenshots, and read the review so you can say what is strong in each.\n"
-                "3. Call submit_design with a short note per variant and the screenshot paths. Do not build "
-                "the rest until the user picks one.")
+                "PHASE: DESIGN — use CLAUDE DESIGN, not code. The user judges this with their eyes, so they get "
+                "a proper design canvas to open, comment on and edit.\n"
+                "1. Call design_canvas ONCE with a full brief written from the approved plan: product and "
+                "audience, the screens and their sections, the palette with hex codes, fonts and type scale, "
+                "spacing and radius, the signature interactions/motion, the real copy, and what makes "
+                "direction A different from direction B.\n"
+                "2. It returns a canvas link with artboards for the key screens, a mobile view and a style "
+                "tile, in two directions.\n"
+                "3. Call submit_design with that canvas_url and a few lines describing A and B. Then stop: the "
+                "user picks a direction (or asks for changes) before anything is built.\n"
+                "Only if design_canvas is unavailable, fall back to two HTML mockups in design/ reviewed with "
+                "preview_site.")
         elif phase == "executing":
             steps = "\n".join(f"{i}. [{s.get('status', 'todo')}] {s.get('title')}" for i, s in enumerate(m.steps))
             parts.append("PHASE: EXECUTING the approved plan. Continue from the first unfinished step. Call "
                          "complete_step after each step; when everything is done and reviewed, call finish.")
             parts.append("APPROVED PLAN:\n" + (m.plan or "(no plan — work directly from the goal)")[:12000])
+            if m.design_url or m.design:
+                parts.append("APPROVED DESIGN — build exactly this. Open the canvas with your Artifact tool "
+                             "(read its artboards) and match the layout, palette, type, spacing and motion:\n"
+                             + (m.design_url + "\n" if m.design_url else "") + m.design[:4000])
             parts.append("STEPS:\n" + (steps or "(none)"))
         else:
             prev = [e["msg"] for e in m.log if e["msg"].startswith("Result:")][-3:]
@@ -470,11 +475,13 @@ class MissionControl:
         if name == "submit_design":
             shots = [str(s) for s in (args.get("screenshots") or [])][:8]
             notes = str(args.get("notes_markdown", ""))
-            (Path(m.workspace) / "DESIGN.md").write_text(notes, encoding="utf-8")
-            self.store.update(m, design=notes, design_shots=shots, stage="design",
+            url = str(args.get("canvas_url") or "")
+            (Path(m.workspace) / "DESIGN.md").write_text((url + "\n\n" if url else "") + notes, encoding="utf-8")
+            self.store.update(m, design=notes, design_shots=shots, design_url=url, stage="design",
                               status="awaiting_plan_approval", phase_note="designs ready", history=[])
-            self._say(m, f"Two design directions for {m.title} are ready to look at — pick one or tell me what "
-                         f"to change.", True)
+            self._say(m, f"Two design directions for {m.title} are ready"
+                         + (f" — open the canvas: {url}" if url else " to look at")
+                         + ". Pick one or tell me what to change.", True)
             self._hook("show_plan", m)
             self._hook("notify", "Designs ready to review", m.title)
             return "designs submitted; waiting for the user's choice", True

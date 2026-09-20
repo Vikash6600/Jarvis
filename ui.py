@@ -2174,8 +2174,10 @@ class MissionBriefOverlay(QWidget):
         md = (mission.design if design_stage else mission.flow if flow_stage else mission.plan) \
             or "_The plan is being prepared…_"
         if design_stage:
+            link = f"\n\n**Canvas:** {mission.design_url}" if getattr(mission, "design_url", "") else ""
             md = ("## Design directions — pick one\n"
-                  "_Say which you prefer (A or B) or what to change, then APPROVE._\n\n" + md)
+                  "_Open the canvas, then say which you prefer (A or B) or what to change._\n\n"
+                  + md + link)
         if flow_stage:
             md = ("## How I understand it — let's agree this before the detailed plan\n"
                   "_Answer the questions or tell me what to change below; APPROVE when the flow is right._\n\n"
@@ -2245,6 +2247,9 @@ class MissionBriefOverlay(QWidget):
             btn("RESUME ▸", True, lambda: self._do(lambda: control.resume(self._m)))
         elif mission.status not in ("done", "cancelled"):
             btn("PAUSE", False, lambda: self._do(lambda: control.pause(self._m)))
+        if getattr(mission, "design_url", ""):
+            btn("OPEN DESIGN CANVAS ↗", False,
+                lambda u=mission.design_url: QDesktopServices.openUrl(QUrl(u)))
         btn("OPEN FOLDER", False, lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(mission.workspace)))
         v.addLayout(row)
 

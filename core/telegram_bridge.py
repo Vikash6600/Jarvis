@@ -130,8 +130,10 @@ class TelegramBridge:
     def send_plan(self, m) -> None:
         if getattr(m, "stage", "") == "design":
             from pathlib import Path as _P
-            self.send(f"🎨 DESIGN DIRECTIONS — #{m.id} {m.title}\n\n{(m.design or '')[:3500]}\n\n"
-                      f"Reply with the one you want (A or B) or what to change.")
+            link = getattr(m, "design_url", "")
+            self.send(f"🎨 DESIGN DIRECTIONS — #{m.id} {m.title}\n\n"
+                      + (f"Open the canvas: {link}\n\n" if link else "")
+                      + f"{(m.design or '')[:3000]}\n\nReply with the one you want (A or B) or what to change.")
             for rel in (m.design_shots or [])[:4]:
                 p = _P(m.workspace) / rel
                 if p.is_file():

@@ -54,6 +54,10 @@ WORKSPACE_TOOLS = [
          "effort": {"type": "string", "description": "low | medium | high | xhigh | max — thinking depth; "
                                                      "use the plan's choice for this step"}},
         ["instruction"]),
+    _fn("design_canvas", "DESIGN stage: have Claude Design build a visual canvas (artboards for the key screens, "
+        "a mobile view and a style tile, in two directions A and B) that the user opens and reviews. Pass the "
+        "full design brief from the plan. Returns the canvas link.",
+        {"brief": S, "title": S}, ["brief"]),
     _fn("look_at_screen", "Capture the user's screen and answer a question about it.", {"question": S}, ["question"]),
     _fn("open_in_browser", "Open a workspace file or a URL in the user's browser.", {"target": S}, ["target"]),
 ]
@@ -73,7 +77,8 @@ CONTROL_TOOLS = [
     _fn("submit_design", "DESIGN stage: submit the visual mockups for the user to choose from. Give a short "
         "note on each variant (mood, palette, type, motion) and the screenshot paths from preview_site. "
         "The mission waits for the user to pick one or ask for changes.",
-        {"notes_markdown": S, "screenshots": {"type": "array", "items": S}}, ["notes_markdown", "screenshots"]),
+        {"notes_markdown": S, "canvas_url": S, "screenshots": {"type": "array", "items": S}},
+        ["notes_markdown"]),
     _fn("complete_step", "Mark a build step done (0-based index) with a short note.",
         {"index": {"type": "integer"}, "note": S}, ["index"]),
     _fn("finish", "The mission (or this routine run) is complete. Give the final summary for the user.",
@@ -263,6 +268,23 @@ class Workspace:
                            default="(no vision model answered — check the VISION job in AI MODELS)")
 
     CLAUDE_BUDGET = 8          # delegate_coding calls per mission run
+
+    def design_canvas(self, brief: str, title: str = "") -> str:
+        from core import claude_cli
+        if not claude_cli.available():
+            return ("Claude Design is unavailable (Claude Code is not installed) — fall back to building two "
+                    "HTML mockups in design/ and screenshotting them with preview_site.")
+        try:
+            self._claude_calls = getattr(self, "_claude_calls", 0) + 1
+            url, notes = claude_cli.design_canvas(brief, title or "Design", cwd=str(self.root))
+        except claude_cli.LimitReached as e:
+            return f"Claude's allowance is spent ({str(e)[:100]}) — build HTML mockups in design/ instead."
+        except Exception as e:
+            return f"Claude Design failed: {str(e)[:200]} — build HTML mockups in design/ instead."
+        if not url:
+            return f"Claude Design returned no canvas link. Its reply was: {notes[:400]}"
+        (self.root / "DESIGN.md").write_text(f"# Design canvas\n\n{url}\n\n{notes}\n", encoding="utf-8")
+        return f"canvas: {url}\n{notes[:1200]}"
 
     def delegate_coding(self, instruction: str, files: str = "", model: str = "", effort: str = "") -> str:
         from core import access, claude_cli, models

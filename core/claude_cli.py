@@ -155,7 +155,9 @@ def run(prompt: str, cwd: str = "", tools: str = "read_only", timeout: int = TIM
                            "@anthropic-ai/claude-code`.")
     allowed = {"read_only": "Read,Glob,Grep",
                "edit": "Read,Glob,Grep,Write,Edit,MultiEdit,NotebookEdit",
-               "full": "Read,Glob,Grep,Write,Edit,MultiEdit,NotebookEdit,Bash"}.get(tools, "Read,Glob,Grep")
+               "full": "Read,Glob,Grep,Write,Edit,MultiEdit,NotebookEdit,Bash",
+               "design": "Read,Glob,Grep,Write,Edit,Artifact",
+               "design_read": "Read,Glob,Grep,Artifact"}.get(tools, "Read,Glob,Grep")
     cmd = [exe, "-p", prompt, "--output-format", "json",
            "--allowed-tools", allowed,
            "--permission-mode", "acceptEdits" if tools != "read_only" else "default"]
@@ -184,6 +186,30 @@ def run(prompt: str, cwd: str = "", tools: str = "read_only", timeout: int = TIM
     except json.JSONDecodeError:
         pass
     return out
+
+
+ARTIFACT_URL = __import__("re").compile(r"https://claude\.(?:ai|com)/(?:code/)?artifact/[A-Za-z0-9]+")
+
+
+def design_canvas(brief: str, title: str, cwd: str = "", timeout: int = TIMEOUT) -> tuple[str, str]:
+    """Have Claude build a Design canvas (artboards on claude.ai) for this brief.
+
+    Returns (url, notes). This is Claude DESIGN — a visual canvas the user opens,
+    comments on and edits — not code in the workspace."""
+    prompt = (
+        "You are designing, not coding. Use your Artifact tool to make a real Design canvas:\n"
+        "1. Call Artifact with action 'quickstart' and intent 'design' first.\n"
+        f"2. Create the Design artifact titled \"{title}\" and fill it with artboards that show the product: "
+        "the key screens at desktop width, one mobile view, and a small style tile (palette with hex codes, "
+        "type scale, buttons/components). Give TWO distinct visual directions (A and B) as separate artboards "
+        "so the user can choose.\n"
+        "3. Use the brief below exactly: real copy, no lorem ipsum, no stock-photo placeholders beyond labelled "
+        "boxes, and design it to a standard you would put in a portfolio.\n"
+        "4. Reply with ONLY the canvas URL on the first line, then at most 6 lines describing A and B.\n\n"
+        f"BRIEF:\n{brief[:12000]}")
+    out = run(prompt, cwd=cwd, tools="design", timeout=timeout, model="sonnet", effort="high")
+    m = ARTIFACT_URL.search(out or "")
+    return (m.group(0) if m else ""), (out or "").strip()
 
 
 def chat(messages: list, timeout: int = TIMEOUT, cli: str = "") -> dict:
